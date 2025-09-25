@@ -1,0 +1,5 @@
+{
+  "name": "Vulkan Invaders",
+  "description": "A retro-style space invaders game built with React and Tailwind CSS, inspired by the aesthetics of low-level graphics programming. This is a web-based simulation and does not use the Vulkan API.",
+  "requestFramePermissions": []
+}
