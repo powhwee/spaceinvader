@@ -1,10 +1,10 @@
-// FIX: Add a triple-slash directive to include WebGPU types and resolve TS errors.
+// FIX: The triple-slash directive below provides TypeScript with WebGPU type definitions, resolving errors about missing types like GPUDevice, GPUBuffer, etc.
 /// <reference types="@webgpu/types" />
 
-import type { Player, Invader, Laser } from './types';
+import type { Player, Invader, Laser, Particle, GameObject } from './types';
 import { GAME_WIDTH, GAME_HEIGHT } from './constants';
 
-const MAX_INSTANCES = 512;
+const MAX_INSTANCES = 4096;
 const INSTANCE_BYTE_SIZE = 32; // pos(vec2f), size(vec2f), color(vec4f) -> 8 + 8 + 16
 
 const invaderColors = [
@@ -63,14 +63,11 @@ fn main(
 `;
 
 const fsCode = `
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) color: vec4<f32>,
-};
-
 @fragment
-fn main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return in.color;
+fn main(
+    @location(0) color: vec4<f32>
+) -> @location(0) vec4<f32> {
+    return color;
 }
 `;
 
@@ -79,6 +76,7 @@ type GameObjects = {
     invaders: Invader[];
     playerLasers: Laser[];
     invaderLasers: Laser[];
+    particles: Particle[];
 };
 
 export class WebGPURenderer {
@@ -178,7 +176,21 @@ export class WebGPURenderer {
             fragment: {
                 module: fsModule,
                 entryPoint: 'main',
-                targets: [{ format: this.presentationFormat }],
+                targets: [{ 
+                    format: this.presentationFormat,
+                    blend: {
+                        color: {
+                            srcFactor: 'src-alpha',
+                            dstFactor: 'one-minus-src-alpha',
+                            operation: 'add',
+                        },
+                        alpha: {
+                            srcFactor: 'one',
+                            dstFactor: 'one-minus-src-alpha',
+                            operation: 'add',
+                        }
+                    }
+                }],
             },
             primitive: { topology: 'triangle-strip' },
         });
@@ -190,7 +202,7 @@ export class WebGPURenderer {
         if (!this.device) return;
 
         let instanceCount = 0;
-        const addInstance = (obj: Player | Invader | Laser, color: number[]) => {
+        const addInstance = (obj: GameObject, color: number[]) => {
             if (instanceCount >= MAX_INSTANCES) return;
             const offset = instanceCount * (INSTANCE_BYTE_SIZE / 4);
             // Center position
@@ -211,6 +223,11 @@ export class WebGPURenderer {
         gameObjects.invaders.forEach(inv => addInstance(inv, invaderColors[inv.type % invaderColors.length]));
         gameObjects.playerLasers.forEach(laser => addInstance(laser, playerLaserColor));
         gameObjects.invaderLasers.forEach(laser => addInstance(laser, invaderLaserColor));
+        gameObjects.particles.forEach(p => {
+            const alpha = Math.max(0, p.life * 2); // Fade out in the last 0.5s
+            const fadedColor = [p.color[0], p.color[1], p.color[2], Math.min(p.color[3], alpha)];
+            addInstance(p, fadedColor);
+        });
 
         this.device.queue.writeBuffer(this.instanceBuffer, 0, this.instanceData, 0, instanceCount * (INSTANCE_BYTE_SIZE / 4));
 

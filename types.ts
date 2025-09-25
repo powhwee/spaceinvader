@@ -1,4 +1,3 @@
-
 export type Position = {
   x: number;
   y: number;
@@ -18,6 +17,12 @@ export type Invader = GameObject & {
 };
 
 export type Laser = GameObject;
+
+export type Particle = GameObject & {
+  velocity: Position;
+  life: number; // time in seconds
+  color: number[];
+};
 
 export enum GameState {
   StartMenu,

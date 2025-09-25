@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameState } from './types';
-import type { Player, Invader, Laser } from './types';
+import type { Player, Invader, Laser, Particle } from './types';
 import {
   GAME_WIDTH, GAME_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT, PLAYER_SPEED, PLAYER_Y_OFFSET,
   LASER_WIDTH, LASER_HEIGHT, PLAYER_LASER_SPEED, INVADER_LASER_SPEED, LASER_COOLDOWN,
@@ -84,6 +83,7 @@ const App: React.FC = () => {
   const invaders = useRef<Invader[]>(createInvaders());
   const playerLasers = useRef<Laser[]>([]);
   const invaderLasers = useRef<Laser[]>([]);
+  const particles = useRef<Particle[]>([]);
   const invaderDirection = useRef<'right' | 'left'>('right');
   const invaderSpeed = useRef<number>(INITIAL_INVADER_SPEED);
 
@@ -94,6 +94,24 @@ const App: React.FC = () => {
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<WebGPURenderer | null>(null);
+
+  const createExplosion = useCallback((position: {x: number, y: number}, count: number, color: number[]) => {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = Math.random() * 100 + 50; // pixels per second
+      particles.current.push({
+        id: performance.now() + Math.random(),
+        position: { x: position.x, y: position.y },
+        size: { width: 3, height: 3 },
+        velocity: {
+          x: Math.cos(angle) * speed,
+          y: Math.sin(angle) * speed,
+        },
+        life: Math.random() * 0.5 + 0.5, // 0.5 to 1.0 seconds lifetime
+        color: color,
+      });
+    }
+  }, []);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -117,6 +135,7 @@ const App: React.FC = () => {
     invaders.current = createInvaders();
     playerLasers.current = [];
     invaderLasers.current = [];
+    particles.current = [];
     invaderDirection.current = 'right';
     invaderSpeed.current = INITIAL_INVADER_SPEED;
     setScore(0);
@@ -165,6 +184,21 @@ const App: React.FC = () => {
     playerLasers.current = playerLasers.current.map(l => ({ ...l, position: { ...l.position, y: l.position.y - PLAYER_LASER_SPEED * deltaTime } })).filter(l => l.position.y > -LASER_HEIGHT);
     invaderLasers.current = invaderLasers.current.map(l => ({ ...l, position: { ...l.position, y: l.position.y + INVADER_LASER_SPEED * deltaTime } })).filter(l => l.position.y < GAME_HEIGHT);
 
+    // Update particles
+    const gravity = 98.0;
+    particles.current = particles.current.map(p => ({
+        ...p,
+        position: {
+            x: p.position.x + p.velocity.x * deltaTime,
+            y: p.position.y + p.velocity.y * deltaTime,
+        },
+        velocity: {
+            ...p.velocity,
+            y: p.velocity.y + gravity * deltaTime,
+        },
+        life: p.life - deltaTime,
+    })).filter(p => p.life > 0);
+
     // Move invaders
     let invadersHitWall = false;
     invaders.current = invaders.current.map(invader => {
@@ -197,22 +231,34 @@ const App: React.FC = () => {
     });
 
     // Collision detection
-    const invadersToRemove: number[] = [];
-    const lasersToRemove: number[] = [];
+    const invadersToRemove = new Set<number>();
+    const lasersToRemove = new Set<number>();
+    const invaderColors = [
+        [236/255, 72/255, 153/255, 1.0], [168/255, 85/255, 247/255, 1.0],
+        [250/255, 204/255, 21/255, 1.0], [34/255, 197/255, 94/255, 1.0],
+        [249/255, 115/255, 22/255, 1.0],
+    ];
 
     playerLasers.current.forEach(laser => {
       invaders.current.forEach(invader => {
-        if (!invadersToRemove.includes(invader.id) && !lasersToRemove.includes(laser.id) && checkCollision(laser, invader)) {
-          invadersToRemove.push(invader.id);
-          lasersToRemove.push(laser.id);
+        if (!invadersToRemove.has(invader.id) && !lasersToRemove.has(laser.id) && checkCollision(laser, invader)) {
+          invadersToRemove.add(invader.id);
+          lasersToRemove.add(laser.id);
           setScore(s => s + 10 * (INVADER_ROWS - invader.type));
+          
+          const explosionPosition = {
+              x: invader.position.x + invader.size.width / 2,
+              y: invader.position.y + invader.size.height / 2,
+          };
+          const explosionColor = invaderColors[invader.type % invaderColors.length];
+          createExplosion(explosionPosition, 30, explosionColor);
         }
       });
     });
 
-    if (invadersToRemove.length > 0) {
-      invaders.current = invaders.current.filter(i => !invadersToRemove.includes(i.id));
-      playerLasers.current = playerLasers.current.filter(l => !lasersToRemove.includes(l.id));
+    if (invadersToRemove.size > 0) {
+      invaders.current = invaders.current.filter(i => !invadersToRemove.has(i.id));
+      playerLasers.current = playerLasers.current.filter(l => !lasersToRemove.has(l.id));
     }
     
     const playerLaserHits: number[] = [];
@@ -242,12 +288,13 @@ const App: React.FC = () => {
             player: player.current,
             invaders: invaders.current,
             playerLasers: playerLasers.current,
-            invaderLasers: invaderLasers.current
+            invaderLasers: invaderLasers.current,
+            particles: particles.current,
         });
     }
 
     animationFrameId.current = requestAnimationFrame(gameLoop);
-  }, []);
+  }, [createExplosion]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => { keysPressed.current[e.key] = true; };
