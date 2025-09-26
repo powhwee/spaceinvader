@@ -8,6 +8,7 @@ import {
   INITIAL_INVADER_SPEED, INVADER_SPEED_INCREMENT, INVADER_DROP_DOWN_AMOUNT, INVADER_FIRE_CHANCE, INITIAL_LIVES
 } from './constants';
 import { WebGPURenderer } from './renderer';
+import { AudioManager, SoundEffect } from './audio';
 
 const createInvaders = (): Invader[] => {
   const invaders: Invader[] = [];
@@ -94,6 +95,7 @@ const App: React.FC = () => {
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<WebGPURenderer | null>(null);
+  const audioManagerRef = useRef<AudioManager | null>(null);
 
   const createExplosion = useCallback((position: {x: number, y: number}, count: number, color: number[]) => {
     for (let i = 0; i < count; i++) {
@@ -143,6 +145,12 @@ const App: React.FC = () => {
   }, []);
   
   const startGame = useCallback(() => {
+    if (!audioManagerRef.current) {
+      const audioManager = new AudioManager();
+      audioManager.initialize();
+      audioManager.loadSounds();
+      audioManagerRef.current = audioManager;
+    }
     resetGame();
     setGameState(GameState.Playing);
   }, [resetGame]);
@@ -178,6 +186,7 @@ const App: React.FC = () => {
         position: { x: player.current.position.x + PLAYER_WIDTH / 2 - LASER_WIDTH / 2, y: player.current.position.y },
         size: { width: LASER_WIDTH, height: LASER_HEIGHT },
       });
+      audioManagerRef.current?.play(SoundEffect.PlayerShoot);
     }
 
     // Move lasers
@@ -227,6 +236,7 @@ const App: React.FC = () => {
           position: { x: invader.position.x + INVADER_WIDTH / 2 - LASER_WIDTH / 2, y: invader.position.y + INVADER_HEIGHT },
           size: { width: LASER_WIDTH, height: LASER_HEIGHT }
         });
+        audioManagerRef.current?.play(SoundEffect.InvaderShoot);
       }
     });
 
@@ -245,6 +255,7 @@ const App: React.FC = () => {
           invadersToRemove.add(invader.id);
           lasersToRemove.add(laser.id);
           setScore(s => s + 10 * (INVADER_ROWS - invader.type));
+          audioManagerRef.current?.play(SoundEffect.InvaderKilled);
           
           const explosionPosition = {
               x: invader.position.x + invader.size.width / 2,
@@ -265,6 +276,7 @@ const App: React.FC = () => {
     invaderLasers.current.forEach(laser => {
       if (checkCollision(laser, player.current)) {
         playerLaserHits.push(laser.id);
+        audioManagerRef.current?.play(SoundEffect.PlayerDeath);
         setLives(l => {
           const newLives = l - 1;
           if (newLives <= 0) {
