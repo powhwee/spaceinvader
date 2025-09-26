@@ -3,6 +3,7 @@
 
 import type { Player, Invader, Laser, Particle, GameObject } from './types';
 import { GAME_WIDTH, GAME_HEIGHT } from './constants';
+import { mat4, vec3 } from 'gl-matrix';
 
 const MAX_INSTANCES = 4096;
 const INSTANCE_BYTE_SIZE = 32; // pos(vec2f), size(vec2f), color(vec4f) -> 8 + 8 + 16
@@ -35,7 +36,7 @@ struct InstanceInput {
 };
 
 struct Globals {
-    resolution: vec2<f32>,
+    view_proj: mat4x4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -48,15 +49,16 @@ fn main(
 ) -> VertexOutput {
     let instance = instances[instance_index];
     
-    let world_pos = (vert.position * instance.model_size) + instance.model_pos;
+    // Treat the 2D game as being on the XY plane in 3D space
+    let world_pos = vec4<f32>(
+        (vert.position.x * instance.model_size.x) + instance.model_pos.x,
+        (vert.position.y * instance.model_size.y) + instance.model_pos.y,
+        0.0,
+        1.0
+    );
     
-    let zero_to_two = world_pos / globals.resolution * 2.0;
-    let minus_one_to_one = zero_to_two - vec2<f32>(1.0, 1.0);
-    
-    let clip_pos = vec4<f32>(minus_one_to_one.x, -minus_one_to_one.y, 0.0, 1.0);
-
     var out: VertexOutput;
-    out.position = clip_pos;
+    out.position = globals.view_proj * world_pos;
     out.color = instance.color;
     return out;
 }
@@ -93,9 +95,18 @@ export class WebGPURenderer {
     private uniformBindGroup!: GPUBindGroup;
     private instanceData: Float32Array;
 
+    // 3D Camera matrices
+    private projectionMatrix: mat4;
+    private viewMatrix: mat4;
+    private viewProjectionMatrix: mat4;
+
     constructor(canvas: HTMLCanvasElement) {
         this.canvas = canvas;
         this.instanceData = new Float32Array(MAX_INSTANCES * (INSTANCE_BYTE_SIZE / 4));
+
+        this.projectionMatrix = mat4.create();
+        this.viewMatrix = mat4.create();
+        this.viewProjectionMatrix = mat4.create();
     }
 
     async init(): Promise<boolean> {
@@ -136,10 +147,9 @@ export class WebGPURenderer {
         this.vertexBuffer.unmap();
         
         this.uniformBuffer = this.device.createBuffer({
-            size: 8, // vec2<f32> for resolution
+            size: 64, // mat4x4<f32> is 4*4*4 = 64 bytes
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
-        this.device.queue.writeBuffer(this.uniformBuffer, 0, new Float32Array([GAME_WIDTH, GAME_HEIGHT]));
 
         this.instanceBuffer = this.device.createBuffer({
             size: MAX_INSTANCES * INSTANCE_BYTE_SIZE,
@@ -198,8 +208,31 @@ export class WebGPURenderer {
         return true;
     }
 
+    private updateCamera() {
+        const fieldOfView = 60 * Math.PI / 180; // 60 degrees
+        const aspect = GAME_WIDTH / GAME_HEIGHT;
+        const zNear = 1;
+        const zFar = 2000;
+        mat4.perspective(this.projectionMatrix, fieldOfView, aspect, zNear, zFar);
+
+        // Position the camera to look at the center of the game area
+        const eye = vec3.fromValues(GAME_WIDTH / 2, GAME_HEIGHT / 2, -500);
+        const center = vec3.fromValues(GAME_WIDTH / 2, GAME_HEIGHT / 2, 0);
+        // Use Y-down to match the game's coordinate system
+        const up = vec3.fromValues(0, -1, 0);
+        mat4.lookAt(this.viewMatrix, eye, center, up);
+
+        // Add the tilt back for a perspective effect
+        mat4.rotateX(this.viewMatrix, this.viewMatrix, 25 * Math.PI / 180);
+
+        mat4.multiply(this.viewProjectionMatrix, this.projectionMatrix, this.viewMatrix);
+    }
+
     render(gameObjects: GameObjects): void {
         if (!this.device) return;
+
+        this.updateCamera();
+        this.device.queue.writeBuffer(this.uniformBuffer, 0, this.viewProjectionMatrix as Float32Array);
 
         let instanceCount = 0;
         const addInstance = (obj: GameObject, color: number[]) => {
