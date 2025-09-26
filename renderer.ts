@@ -135,8 +135,8 @@ export class WebGPURenderer {
         const quadVertices = new Float32Array([
             -0.5, -0.5,
              0.5, -0.5,
-             0.5,  0.5,
             -0.5,  0.5,
+            0.5,  0.5,
         ]);
         this.vertexBuffer = this.device.createBuffer({
             size: quadVertices.byteLength,
@@ -215,15 +215,19 @@ export class WebGPURenderer {
         const zFar = 2000;
         mat4.perspective(this.projectionMatrix, fieldOfView, aspect, zNear, zFar);
 
-        // Position the camera to look at the center of the game area
-        const eye = vec3.fromValues(GAME_WIDTH / 2, GAME_HEIGHT / 2, -500);
-        const center = vec3.fromValues(GAME_WIDTH / 2, GAME_HEIGHT / 2, 0);
-        // Use Y-down to match the game's coordinate system
-        const up = vec3.fromValues(0, -1, 0);
+        const eye = vec3.fromValues(
+            GAME_WIDTH / 2,
+            GAME_HEIGHT + 150, // Position camera "below" the board
+            -700 // and pull it back
+        );
+        const center = vec3.fromValues(
+            GAME_WIDTH / 2,
+            GAME_HEIGHT / 2 - 50, // Look slightly "up" from the center
+            0
+        );
+        const up = vec3.fromValues(0, -1, 0); // Y-down
+        
         mat4.lookAt(this.viewMatrix, eye, center, up);
-
-        // Add the tilt back for a perspective effect
-        mat4.rotateX(this.viewMatrix, this.viewMatrix, 25 * Math.PI / 180);
 
         mat4.multiply(this.viewProjectionMatrix, this.projectionMatrix, this.viewMatrix);
     }
