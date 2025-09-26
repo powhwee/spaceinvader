@@ -28,9 +28,10 @@ const createInvaders = (): Invader[] => {
   return invaders;
 };
 
-const GameUI: React.FC<{ score: number; lives: number }> = ({ score, lives }) => (
+const GameUI: React.FC<{ score: number; lives: number, cameraYOffset: number }> = ({ score, lives, cameraYOffset }) => (
     <div className="p-4 flex justify-between text-2xl text-cyan-400 font-['VT323']">
         <span>SCORE: {score}</span>
+        <p>CAMERA_Y: {cameraYOffset.toFixed(2)}</p>
         <span>LIVES: {'<'.repeat(lives).padEnd(INITIAL_LIVES, ' ')}</span>
     </div>
 );
@@ -46,6 +47,7 @@ const StartScreen: React.FC<{ onStart: () => void, isReady: boolean }> = ({ onSt
         <h1 className="text-6xl text-cyan-400 font-title mb-4 animate-pulse">VULKAN INVADERS</h1>
         <p className="text-xl text-green-400 mb-8 max-w-lg">A low-level simulation of a high-stakes arcade classic. The fate of the render pipeline is in your hands.</p>
         <p className="text-lg text-gray-400 mb-2">[A][D] or [LEFT][RIGHT] to move. [SPACE] to fire.</p>
+        <p className="text-lg text-gray-400 mb-2">[UP][DOWN] to change camera perspective.</p>
         <button
             onClick={onStart}
             disabled={!isReady}
@@ -75,6 +77,7 @@ const App: React.FC = () => {
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(INITIAL_LIVES);
   const [isRendererReady, setIsRendererReady] = useState(false);
+  const [cameraYOffset, setCameraYOffset] = useState(150);
 
   const player = useRef<Player>({
     id: 1,
@@ -302,14 +305,25 @@ const App: React.FC = () => {
             playerLasers: playerLasers.current,
             invaderLasers: invaderLasers.current,
             particles: particles.current,
-        });
+        }, cameraYOffset);
     }
 
     animationFrameId.current = requestAnimationFrame(gameLoop);
-  }, [createExplosion]);
+  }, [createExplosion, cameraYOffset]);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => { keysPressed.current[e.key] = true; };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      keysPressed.current[e.key] = true;
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setCameraYOffset(o => o + 30);
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setCameraYOffset(o => o - 30);
+      }
+    };
     const handleKeyUp = (e: KeyboardEvent) => { keysPressed.current[e.key] = false; };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
@@ -342,7 +356,7 @@ const App: React.FC = () => {
             {gameState === GameState.GameOver && <GameOverScreen score={score} onRestart={startGame} />}
           </div>
         )}
-        {gameState === GameState.Playing && <GameUI score={score} lives={lives} />}
+        {gameState === GameState.Playing && <GameUI score={score} lives={lives} cameraYOffset={cameraYOffset} />}
       </div>
     </div>
   );
