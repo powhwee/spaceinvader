@@ -1,12 +1,11 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
 
-# Run and deploy your AI Studio app
 
-This contains everything you need to run your app locally.
+# Space Invader game using WebGPU
 
-View your app in AI Studio: https://ai.studio/apps/drive/1sUdgJuOcn3fHb2EdURhS_linwBycJhxn
+This app is mostly generated and created using Google AI Studio. 
+Features are added incrementally; the initial iteration was simply a 2D space invader game. 
+This was then iterated multiple times to add in WebGPU, and then to continue to utilise WebGPU features.
+
 
 ## Run Locally
 
@@ -15,6 +14,5 @@ View your app in AI Studio: https://ai.studio/apps/drive/1sUdgJuOcn3fHb2EdURhS_l
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Run the app:
    `npm run dev`
