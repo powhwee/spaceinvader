@@ -44,8 +44,8 @@ const ScreenOverlay: React.FC<{ children: React.ReactNode, className?: string }>
 
 const StartScreen: React.FC<{ onStart: () => void, isReady: boolean }> = ({ onStart, isReady }) => (
     <ScreenOverlay>
-        <h1 className="text-6xl text-cyan-400 font-title mb-4 animate-pulse">VULKAN INVADERS</h1>
-        <p className="text-xl text-green-400 mb-8 max-w-lg">A low-level simulation of a high-stakes arcade classic. The fate of the render pipeline is in your hands.</p>
+        <h1 className="text-6xl text-cyan-400 font-title mb-4 animate-pulse">SPACE INVADERS</h1>
+        <p className="text-xl text-green-400 mb-8 max-w-lg">A low-level simulation of a high-stakes arcade classic. Created using Gemini AI over multiple iterations of changes.  The fate of the render pipeline is in your hands.</p>
         <p className="text-lg text-gray-400 mb-2">[A][D] or [LEFT][RIGHT] to move. [SPACE] to fire.</p>
         <p className="text-lg text-gray-400 mb-2">[UP][DOWN] to change camera perspective.</p>
         <button

@@ -135,8 +135,8 @@ export class WebGPURenderer {
         const quadVertices = new Float32Array([
             -0.5, -0.5,
              0.5, -0.5,
-             0.5,  0.5,
             -0.5,  0.5,
+            0.5,  0.5,
         ]);
         this.vertexBuffer = this.device.createBuffer({
             size: quadVertices.byteLength,
@@ -209,7 +209,7 @@ export class WebGPURenderer {
     }
 
     private updateCamera(cameraYOffset: number) {
-        const fieldOfView = 60 * Math.PI / 180; // 60 degrees
+        const fieldOfView = 50 * Math.PI / 180; // 60 degrees
         const aspect = GAME_WIDTH / GAME_HEIGHT;
         const zNear = 1;
         const zFar = 2000;
@@ -218,7 +218,7 @@ export class WebGPURenderer {
         const eye = vec3.fromValues(
             GAME_WIDTH / 2,
             GAME_HEIGHT + cameraYOffset, // Position camera "below" the board
-            -700 // and pull it back
+            -750 // and pull it back
         );
         const center = vec3.fromValues(
             GAME_WIDTH / 2,
