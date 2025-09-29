@@ -13,7 +13,8 @@ This was then iterated multiple times to add in WebGPU, and then to continue to 
 
 1. Clone the repo:
    `git clone https://github.com/powhwee/spaceinvader.git`
-2. Install dependencies:
+2. Change directory into where the repo is checked out.Install dependencies:
+   `cd spaceinvader`
    `npm install`
 3. Run the app:
    `npm run dev`
