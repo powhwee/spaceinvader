@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameState } from './types';
-import type { Player, Invader, Laser, Particle } from './types';
+import type { Player, Invader, Laser, Particle, Position } from './types';
 import {
-  GAME_WIDTH, GAME_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT, PLAYER_SPEED, PLAYER_Y_OFFSET,
-  LASER_WIDTH, LASER_HEIGHT, PLAYER_LASER_SPEED, INVADER_LASER_SPEED, LASER_COOLDOWN,
-  INVADER_WIDTH, INVADER_HEIGHT, INVADER_ROWS, INVADER_COLS, INVADER_SPACING, INVADER_INITIAL_Y,
+  GAME_WIDTH, GAME_HEIGHT, 
+  PLAYER_WIDTH, PLAYER_HEIGHT, PLAYER_DEPTH, PLAYER_SPEED, PLAYER_Y_OFFSET,
+  LASER_WIDTH, LASER_HEIGHT, LASER_DEPTH, PLAYER_LASER_SPEED, INVADER_LASER_SPEED, LASER_COOLDOWN,
+  INVADER_WIDTH, INVADER_HEIGHT, INVADER_DEPTH, INVADER_ROWS, INVADER_COLS, INVADER_SPACING, INVADER_INITIAL_Y,
   INITIAL_INVADER_SPEED, INVADER_SPEED_INCREMENT, INVADER_DROP_DOWN_AMOUNT, INVADER_FIRE_CHANCE, INITIAL_LIVES
 } from './constants';
 import { WebGPURenderer } from './renderer';
@@ -18,9 +19,10 @@ const createInvaders = (): Invader[] => {
         id: Date.now() + row * INVADER_COLS + col,
         position: {
           x: col * INVADER_SPACING.x + (GAME_WIDTH - INVADER_COLS * INVADER_SPACING.x) / 2 + 5,
-          y: row * INVADER_SPACING.y + INVADER_INITIAL_Y,
+          y: (GAME_HEIGHT - INVADER_INITIAL_Y - INVADER_HEIGHT) - (row * INVADER_SPACING.y),
+          z: 0,
         },
-        size: { width: INVADER_WIDTH, height: INVADER_HEIGHT },
+        size: { width: INVADER_WIDTH, height: INVADER_HEIGHT, depth: INVADER_DEPTH },
         type: row,
       });
     }
@@ -44,8 +46,8 @@ const ScreenOverlay: React.FC<{ children: React.ReactNode, className?: string }>
 
 const StartScreen: React.FC<{ onStart: () => void, isReady: boolean }> = ({ onStart, isReady }) => (
     <ScreenOverlay>
-        <h1 className="text-6xl text-cyan-400 font-title mb-4 animate-pulse">SPACE INVADERS</h1>
-        <p className="text-xl text-green-400 mb-8 max-w-lg">A low-level simulation of a high-stakes arcade classic. Created using Gemini AI over multiple iterations of changes.  The fate of the render pipeline is in your hands.</p>
+        <h1 className="text-6xl text-cyan-400 font-title mb-4 animate-pulse">SPACE INVADERS 3D</h1>
+        <p className="text-xl text-green-400 mb-8 max-w-lg">A 3D simulation of a high-stakes arcade classic. Created using Gemini AI. The fate of the render pipeline is in your hands.</p>
         <p className="text-lg text-gray-400 mb-2">[A][D] or [LEFT][RIGHT] to move. [SPACE] to fire.</p>
         <p className="text-lg text-gray-400 mb-2">[UP][DOWN] to change camera perspective.</p>
         <button
@@ -77,12 +79,13 @@ const App: React.FC = () => {
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(INITIAL_LIVES);
   const [isRendererReady, setIsRendererReady] = useState(false);
-  const [cameraYOffset, setCameraYOffset] = useState(150);
+  //const [cameraYOffset, setCameraYOffset] = useState(0);
+  const cameraYOffset = 0;
 
   const player = useRef<Player>({
     id: 1,
-    position: { x: (GAME_WIDTH - PLAYER_WIDTH) / 2, y: GAME_HEIGHT - PLAYER_HEIGHT - PLAYER_Y_OFFSET },
-    size: { width: PLAYER_WIDTH, height: PLAYER_HEIGHT },
+    position: { x: (GAME_WIDTH - PLAYER_WIDTH) / 2, y: PLAYER_Y_OFFSET, z: 0 },
+    size: { width: PLAYER_WIDTH, height: PLAYER_HEIGHT, depth: PLAYER_DEPTH },
   });
   const invaders = useRef<Invader[]>(createInvaders());
   const playerLasers = useRef<Laser[]>([]);
@@ -100,17 +103,19 @@ const App: React.FC = () => {
   const rendererRef = useRef<WebGPURenderer | null>(null);
   const audioManagerRef = useRef<AudioManager | null>(null);
 
-  const createExplosion = useCallback((position: {x: number, y: number}, count: number, color: number[]) => {
+  const createExplosion = useCallback((position: Position, count: number, color: number[]) => {
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const speed = Math.random() * 100 + 50; // pixels per second
+      const pitch = Math.random() * Math.PI - Math.PI / 2;
+      const speed = Math.random() * 150 + 50; // pixels per second
       particles.current.push({
         id: performance.now() + Math.random(),
-        position: { x: position.x, y: position.y },
-        size: { width: 3, height: 3 },
+        position: { x: position.x, y: position.y, z: position.z },
+        size: { width: 3, height: 3, depth: 3 },
         velocity: {
-          x: Math.cos(angle) * speed,
-          y: Math.sin(angle) * speed,
+          x: Math.cos(angle) * Math.cos(pitch) * speed,
+          y: Math.sin(pitch) * speed,
+          z: Math.sin(angle) * Math.cos(pitch) * speed,
         },
         life: Math.random() * 0.5 + 0.5, // 0.5 to 1.0 seconds lifetime
         color: color,
@@ -134,8 +139,8 @@ const App: React.FC = () => {
   const resetGame = useCallback(() => {
     player.current = {
       id: 1,
-      position: { x: (GAME_WIDTH - PLAYER_WIDTH) / 2, y: GAME_HEIGHT - PLAYER_HEIGHT - PLAYER_Y_OFFSET },
-      size: { width: PLAYER_WIDTH, height: PLAYER_HEIGHT },
+      position: { x: (GAME_WIDTH - PLAYER_WIDTH) / 2, y: PLAYER_Y_OFFSET, z: 0 },
+      size: { width: PLAYER_WIDTH, height: PLAYER_HEIGHT, depth: PLAYER_DEPTH },
     };
     invaders.current = createInvaders();
     playerLasers.current = [];
@@ -147,23 +152,25 @@ const App: React.FC = () => {
     setLives(INITIAL_LIVES);
   }, []);
   
-  const startGame = useCallback(() => {
+  const startGame = useCallback(async () => {
     if (!audioManagerRef.current) {
       const audioManager = new AudioManager();
       audioManager.initialize();
-      audioManager.loadSounds();
+      await audioManager.loadSounds();
       audioManagerRef.current = audioManager;
     }
     resetGame();
     setGameState(GameState.Playing);
   }, [resetGame]);
 
-  const checkCollision = (obj1: Player | Laser, obj2: Player | Laser | Invader) => {
+  const checkCollision = (obj1: Player | Laser | Particle, obj2: Player | Laser | Invader) => {
     return (
       obj1.position.x < obj2.position.x + obj2.size.width &&
       obj1.position.x + obj1.size.width > obj2.position.x &&
       obj1.position.y < obj2.position.y + obj2.size.height &&
-      obj1.position.y + obj1.size.height > obj2.position.y
+      obj1.position.y + obj1.size.height > obj2.position.y &&
+      obj1.position.z < obj2.position.z + obj2.size.depth &&
+      obj1.position.z + obj1.size.depth > obj2.position.z
     );
   };
 
@@ -186,49 +193,52 @@ const App: React.FC = () => {
       lastPlayerFireTime.current = currentTime;
       playerLasers.current.push({
         id: currentTime,
-        position: { x: player.current.position.x + PLAYER_WIDTH / 2 - LASER_WIDTH / 2, y: player.current.position.y },
-        size: { width: LASER_WIDTH, height: LASER_HEIGHT },
+        position: { 
+            x: player.current.position.x + PLAYER_WIDTH / 2 - LASER_WIDTH / 2, 
+            y: player.current.position.y + PLAYER_HEIGHT, 
+            z: player.current.position.z 
+        },
+        size: { width: LASER_WIDTH, height: LASER_HEIGHT, depth: LASER_DEPTH },
       });
       audioManagerRef.current?.play(SoundEffect.PlayerShoot);
     }
 
     // Move lasers
-    playerLasers.current = playerLasers.current.map(l => ({ ...l, position: { ...l.position, y: l.position.y - PLAYER_LASER_SPEED * deltaTime } })).filter(l => l.position.y > -LASER_HEIGHT);
-    invaderLasers.current = invaderLasers.current.map(l => ({ ...l, position: { ...l.position, y: l.position.y + INVADER_LASER_SPEED * deltaTime } })).filter(l => l.position.y < GAME_HEIGHT);
+    playerLasers.current = playerLasers.current.map(l => ({ ...l, position: { ...l.position, y: l.position.y + PLAYER_LASER_SPEED * deltaTime } })).filter(l => l.position.y < GAME_HEIGHT);
+    invaderLasers.current = invaderLasers.current.map(l => ({ ...l, position: { ...l.position, y: l.position.y - INVADER_LASER_SPEED * deltaTime } })).filter(l => l.position.y > 0);
 
     // Update particles
-    const gravity = 98.0;
+    const gravity = -98.0; // Gravity pulls down in a Y-up system
     particles.current = particles.current.map(p => ({
         ...p,
         position: {
             x: p.position.x + p.velocity.x * deltaTime,
             y: p.position.y + p.velocity.y * deltaTime,
+            z: p.position.z + p.velocity.z * deltaTime,
         },
         velocity: {
             ...p.velocity,
             y: p.velocity.y + gravity * deltaTime,
         },
         life: p.life - deltaTime,
-    })).filter(p => p.life > 0);
+    })).filter(p => p.life > 0 && p.position.y > 0);
 
     // Move invaders
     let invadersHitWall = false;
-    invaders.current = invaders.current.map(invader => {
-      let invX = invader.position.x;
-      if (invaderDirection.current === 'right') {
-        invX += invaderSpeed.current * deltaTime;
-        if (invX + INVADER_WIDTH > GAME_WIDTH) invadersHitWall = true;
-      } else {
-        invX -= invaderSpeed.current * deltaTime;
-        if (invX < 0) invadersHitWall = true;
-      }
-      return { ...invader, position: { ...invader.position, x: invX } };
+    invaders.current.forEach(invader => {
+        if (invaderDirection.current === 'right') {
+            invader.position.x += invaderSpeed.current * deltaTime;
+            if (invader.position.x + INVADER_WIDTH > GAME_WIDTH) invadersHitWall = true;
+        } else {
+            invader.position.x -= invaderSpeed.current * deltaTime;
+            if (invader.position.x < 0) invadersHitWall = true;
+        }
     });
 
     if (invadersHitWall) {
       invaderDirection.current = invaderDirection.current === 'right' ? 'left' : 'right';
       invaderSpeed.current += INVADER_SPEED_INCREMENT;
-      invaders.current = invaders.current.map(invader => ({ ...invader, position: { ...invader.position, y: invader.position.y + INVADER_DROP_DOWN_AMOUNT } }));
+      invaders.current.forEach(invader => invader.position.y -= INVADER_DROP_DOWN_AMOUNT);
     }
 
     // Invader firing
@@ -236,8 +246,12 @@ const App: React.FC = () => {
       if (Math.random() < INVADER_FIRE_CHANCE) {
         invaderLasers.current.push({
           id: performance.now() + invader.id,
-          position: { x: invader.position.x + INVADER_WIDTH / 2 - LASER_WIDTH / 2, y: invader.position.y + INVADER_HEIGHT },
-          size: { width: LASER_WIDTH, height: LASER_HEIGHT }
+          position: { 
+              x: invader.position.x + INVADER_WIDTH / 2 - LASER_WIDTH / 2, 
+              y: invader.position.y,
+              z: invader.position.z
+            },
+          size: { width: LASER_WIDTH, height: LASER_HEIGHT, depth: LASER_DEPTH }
         });
         audioManagerRef.current?.play(SoundEffect.InvaderShoot);
       }
@@ -263,9 +277,10 @@ const App: React.FC = () => {
           const explosionPosition = {
               x: invader.position.x + invader.size.width / 2,
               y: invader.position.y + invader.size.height / 2,
+              z: invader.position.z + invader.size.depth / 2,
           };
           const explosionColor = invaderColors[invader.type % invaderColors.length];
-          createExplosion(explosionPosition, 30, explosionColor);
+          createExplosion(explosionPosition, 50, explosionColor);
         }
       });
     });
@@ -280,6 +295,13 @@ const App: React.FC = () => {
       if (checkCollision(laser, player.current)) {
         playerLaserHits.push(laser.id);
         audioManagerRef.current?.play(SoundEffect.PlayerDeath);
+        const explosionPosition = {
+            x: player.current.position.x + player.current.size.width / 2,
+            y: player.current.position.y + player.current.size.height / 2,
+            z: player.current.position.z + player.current.size.depth / 2,
+        };
+        createExplosion(explosionPosition, 100, [1.0, 1.0, 1.0, 1.0]);
+
         setLives(l => {
           const newLives = l - 1;
           if (newLives <= 0) {
@@ -293,7 +315,7 @@ const App: React.FC = () => {
         invaderLasers.current = invaderLasers.current.filter(l => !playerLaserHits.includes(l.id));
     }
     
-    if (invaders.current.some(invader => invader.position.y + INVADER_HEIGHT >= player.current.position.y) || invaders.current.length === 0) {
+    if (invaders.current.some(invader => invader.position.y <= player.current.position.y + PLAYER_HEIGHT) || invaders.current.length === 0) {
       setGameState(GameState.GameOver);
     }
 
@@ -311,18 +333,20 @@ const App: React.FC = () => {
     animationFrameId.current = requestAnimationFrame(gameLoop);
   }, [createExplosion, cameraYOffset]);
 
+  
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       keysPressed.current[e.key] = true;
 
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setCameraYOffset(o => o + 30);
-      }
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setCameraYOffset(o => o - 30);
-      }
+      //if (e.key === 'ArrowUp') {
+      //  e.preventDefault();
+      //  setCameraYOffset(o => o + 30);
+      //}
+      //if (e.key === 'ArrowDown') {
+      // e.preventDefault();
+      //  setCameraYOffset(o => o - 30);
+      //}
     };
     const handleKeyUp = (e: KeyboardEvent) => { keysPressed.current[e.key] = false; };
     window.addEventListener('keydown', handleKeyDown);

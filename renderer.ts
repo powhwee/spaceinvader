@@ -6,7 +6,8 @@ import { GAME_WIDTH, GAME_HEIGHT } from './constants';
 import { mat4, vec3 } from 'gl-matrix';
 
 const MAX_INSTANCES = 4096;
-const INSTANCE_BYTE_SIZE = 32; // pos(vec2f), size(vec2f), color(vec4f) -> 8 + 8 + 16
+// pos(vec3f), size(vec3f), color(vec4f) -> 12 + 12 + 16 = 40 bytes
+const INSTANCE_BYTE_SIZE = 48; 
 
 const invaderColors = [
   [236/255, 72/255, 153/255, 1.0],  // Pink
@@ -21,17 +22,19 @@ const invaderLaserColor = [239/255, 68/255, 68/255, 1.0];
 
 const vsCode = `
 struct VertexInput {
-    @location(0) position: vec2<f32>,
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
 };
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
+    @location(1) normal: vec3<f32>,
 };
 
 struct InstanceInput {
-    model_pos: vec2<f32>,
-    model_size: vec2<f32>,
+    model_pos: vec3<f32>,
+    model_size: vec3<f32>,
     color: vec4<f32>,
 };
 
@@ -49,17 +52,15 @@ fn main(
 ) -> VertexOutput {
     let instance = instances[instance_index];
     
-    // Treat the 2D game as being on the XY plane in 3D space
     let world_pos = vec4<f32>(
-        (vert.position.x * instance.model_size.x) + instance.model_pos.x,
-        (vert.position.y * instance.model_size.y) + instance.model_pos.y,
-        0.0,
+        (vert.position * instance.model_size) + instance.model_pos,
         1.0
     );
     
     var out: VertexOutput;
     out.position = globals.view_proj * world_pos;
     out.color = instance.color;
+    out.normal = vert.normal; // Pass the normal for lighting calculations
     return out;
 }
 `;
@@ -67,11 +68,65 @@ fn main(
 const fsCode = `
 @fragment
 fn main(
-    @location(0) color: vec4<f32>
+    @location(0) color: vec4<f32>,
+    @location(1) normal: vec3<f32>
 ) -> @location(0) vec4<f32> {
-    return color;
+    // A new light direction that works well with our camera angle.
+    // It shines from slightly to the side, from above, and from the front.
+    let light_direction = normalize(vec3<f32>(0.3, 0.6, 0.7));
+
+    // A minimum brightness of 0.25 ensures cubes are never completely black (ambient light).
+    let diffuse_strength = max(dot(normal, light_direction), 0.25);
+    
+    let final_color = color.rgb * diffuse_strength;
+    return vec4<f32>(final_color, color.a);
 }
 `;
+
+
+// 3D Cube data (vertices and normals)
+const cubeVertices = new Float32Array([
+    //-z
+    -0.5, -0.5, -0.5, 0.0, 0.0, -1.0,
+     0.5, -0.5, -0.5, 0.0, 0.0, -1.0,
+     0.5,  0.5, -0.5, 0.0, 0.0, -1.0,
+    -0.5,  0.5, -0.5, 0.0, 0.0, -1.0,
+    //+z
+    -0.5, -0.5, 0.5, 0.0, 0.0, 1.0,
+     0.5, -0.5, 0.5, 0.0, 0.0, 1.0,
+     0.5,  0.5, 0.5, 0.0, 0.0, 1.0,
+    -0.5,  0.5, 0.5, 0.0, 0.0, 1.0,
+    //-x
+    -0.5, -0.5, -0.5, -1.0, 0.0, 0.0,
+    -0.5,  0.5, -0.5, -1.0, 0.0, 0.0,
+    -0.5,  0.5,  0.5, -1.0, 0.0, 0.0,
+    -0.5, -0.5,  0.5, -1.0, 0.0, 0.0,
+    //+x
+     0.5, -0.5, -0.5, 1.0, 0.0, 0.0,
+     0.5,  0.5, -0.5, 1.0, 0.0, 0.0,
+     0.5,  0.5,  0.5, 1.0, 0.0, 0.0,
+     0.5, -0.5,  0.5, 1.0, 0.0, 0.0,
+    //-y
+    -0.5, -0.5, -0.5, 0.0, -1.0, 0.0,
+     0.5, -0.5, -0.5, 0.0, -1.0, 0.0,
+     0.5, -0.5,  0.5, 0.0, -1.0, 0.0,
+    -0.5, -0.5,  0.5, 0.0, -1.0, 0.0,
+    //+y
+    -0.5,  0.5, -0.5, 0.0, 1.0, 0.0,
+     0.5,  0.5, -0.5, 0.0, 1.0, 0.0,
+     0.5,  0.5,  0.5, 0.0, 1.0, 0.0,
+    -0.5,  0.5,  0.5, 0.0, 1.0, 0.0,
+]);
+
+const cubeIndices = new Uint16Array([
+    0, 1, 2, 0, 2, 3, // -z
+    4, 5, 6, 4, 6, 7, // +z
+    8, 9, 10, 8, 10, 11, // -x
+    12, 13, 14, 12, 14, 15, // +x
+    16, 17, 18, 16, 18, 19, // -y
+    20, 21, 22, 20, 22, 23, // +y
+]);
+
 
 type GameObjects = {
     player: Player;
@@ -87,8 +142,10 @@ export class WebGPURenderer {
     private context!: GPUCanvasContext;
     private pipeline!: GPURenderPipeline;
     private presentationFormat!: GPUTextureFormat;
+    private depthTexture!: GPUTexture;
 
     private vertexBuffer!: GPUBuffer;
+    private indexBuffer!: GPUBuffer;
     private uniformBuffer!: GPUBuffer;
     private instanceBuffer!: GPUBuffer;
 
@@ -129,22 +186,30 @@ export class WebGPURenderer {
             alphaMode: 'premultiplied',
         });
 
+        this.depthTexture = this.device.createTexture({
+            size: [this.canvas.width, this.canvas.height],
+            format: 'depth24plus',
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+
         const vsModule = this.device.createShaderModule({ code: vsCode });
         const fsModule = this.device.createShaderModule({ code: fsCode });
 
-        const quadVertices = new Float32Array([
-            -0.5, -0.5,
-             0.5, -0.5,
-            -0.5,  0.5,
-            0.5,  0.5,
-        ]);
         this.vertexBuffer = this.device.createBuffer({
-            size: quadVertices.byteLength,
+            size: cubeVertices.byteLength,
             usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
             mappedAtCreation: true,
         });
-        new Float32Array(this.vertexBuffer.getMappedRange()).set(quadVertices);
+        new Float32Array(this.vertexBuffer.getMappedRange()).set(cubeVertices);
         this.vertexBuffer.unmap();
+
+        this.indexBuffer = this.device.createBuffer({
+            size: cubeIndices.byteLength,
+            usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+            mappedAtCreation: true,
+        });
+        new Uint16Array(this.indexBuffer.getMappedRange()).set(cubeIndices);
+        this.indexBuffer.unmap();
         
         this.uniformBuffer = this.device.createBuffer({
             size: 64, // mat4x4<f32> is 4*4*4 = 64 bytes
@@ -179,8 +244,11 @@ export class WebGPURenderer {
                 module: vsModule,
                 entryPoint: 'main',
                 buffers: [{
-                    arrayStride: 2 * 4, // 2 floats, 4 bytes each
-                    attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }],
+                    arrayStride: 6 * 4, // 3 floats for position, 3 for normal
+                    attributes: [
+                        { shaderLocation: 0, offset: 0, format: 'float32x3' }, // position
+                        { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }, // normal
+                    ],
                 }],
             },
             fragment: {
@@ -202,14 +270,19 @@ export class WebGPURenderer {
                     }
                 }],
             },
-            primitive: { topology: 'triangle-strip' },
+            primitive: { topology: 'triangle-list' },
+            depthStencil: {
+                depthWriteEnabled: true,
+                depthCompare: 'less',
+                format: 'depth24plus',
+            },
         });
 
         return true;
     }
 
     private updateCamera(cameraYOffset: number) {
-        const fieldOfView = 50 * Math.PI / 180; // 60 degrees
+        const fieldOfView = 60 * Math.PI / 180;
         const aspect = GAME_WIDTH / GAME_HEIGHT;
         const zNear = 1;
         const zFar = 2000;
@@ -217,15 +290,15 @@ export class WebGPURenderer {
 
         const eye = vec3.fromValues(
             GAME_WIDTH / 2,
-            GAME_HEIGHT + cameraYOffset, // Position camera "below" the board
-            -750 // and pull it back
+            120,
+            600
         );
         const center = vec3.fromValues(
             GAME_WIDTH / 2,
-            GAME_HEIGHT / 2 - 50, // Look slightly "up" from the center
+            290,
             0
         );
-        const up = vec3.fromValues(0, -1, 0); // Y-down
+        const up = vec3.fromValues(0, 1, 0);
         
         mat4.lookAt(this.viewMatrix, eye, center, up);
 
@@ -242,26 +315,32 @@ export class WebGPURenderer {
         const addInstance = (obj: GameObject, color: number[]) => {
             if (instanceCount >= MAX_INSTANCES) return;
             const offset = instanceCount * (INSTANCE_BYTE_SIZE / 4);
+
+            const worldY = obj.position.y + obj.size.height / 2;
+
             // Center position
             this.instanceData[offset + 0] = obj.position.x + obj.size.width / 2;
-            this.instanceData[offset + 1] = obj.position.y + obj.size.height / 2;
+            this.instanceData[offset + 1] = worldY;
+            this.instanceData[offset + 2] = obj.position.z + obj.size.depth / 2;
             // Size
-            this.instanceData[offset + 2] = obj.size.width;
-            this.instanceData[offset + 3] = obj.size.height;
+            this.instanceData[offset + 4] = obj.size.width;
+            this.instanceData[offset + 5] = obj.size.height;
+            this.instanceData[offset + 6] = obj.size.depth;
             // Color
-            this.instanceData[offset + 4] = color[0];
-            this.instanceData[offset + 5] = color[1];
-            this.instanceData[offset + 6] = color[2];
-            this.instanceData[offset + 7] = color[3];
+            this.instanceData[offset + 8] = color[0];
+            this.instanceData[offset + 9] = color[1];
+            this.instanceData[offset + 10] = color[2];
+            this.instanceData[offset + 11] = color[3];
             instanceCount++;
         };
 
         addInstance(gameObjects.player, playerColor);
         gameObjects.invaders.forEach(inv => addInstance(inv, invaderColors[inv.type % invaderColors.length]));
+        // Lasers and particles will be rendered as cubes for now.
         gameObjects.playerLasers.forEach(laser => addInstance(laser, playerLaserColor));
         gameObjects.invaderLasers.forEach(laser => addInstance(laser, invaderLaserColor));
         gameObjects.particles.forEach(p => {
-            const alpha = Math.max(0, p.life * 2); // Fade out in the last 0.5s
+            const alpha = Math.max(0, p.life * 2);
             const fadedColor = [p.color[0], p.color[1], p.color[2], Math.min(p.color[3], alpha)];
             addInstance(p, fadedColor);
         });
@@ -278,13 +357,20 @@ export class WebGPURenderer {
                 loadOp: 'clear',
                 storeOp: 'store',
             }],
+            depthStencilAttachment: {
+                view: this.depthTexture.createView(),
+                depthClearValue: 1.0,
+                depthLoadOp: 'clear',
+                depthStoreOp: 'store',
+            },
         };
 
         const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
         passEncoder.setPipeline(this.pipeline);
         passEncoder.setBindGroup(0, this.uniformBindGroup);
         passEncoder.setVertexBuffer(0, this.vertexBuffer);
-        passEncoder.draw(4, instanceCount, 0, 0);
+        passEncoder.setIndexBuffer(this.indexBuffer, 'uint16');
+        passEncoder.drawIndexed(cubeIndices.length, instanceCount, 0, 0, 0);
         passEncoder.end();
 
         this.device.queue.submit([commandEncoder.finish()]);

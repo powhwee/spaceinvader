@@ -1,12 +1,13 @@
 export type Position = {
   x: number;
   y: number;
+  z: number;
 };
 
 export type GameObject = {
   id: number;
   position: Position;
-  size: { width: number; height: number };
+  size: { width: number; height: number; depth: number };
 };
 
 // FIX: Export the 'Player' type as an alias of 'GameObject' to resolve the import error.
