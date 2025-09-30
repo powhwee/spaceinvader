@@ -33,7 +33,7 @@ const createInvaders = (): Invader[] => {
 const GameUI: React.FC<{ score: number; lives: number, cameraYOffset: number }> = ({ score, lives, cameraYOffset }) => (
     <div className="p-4 flex justify-between text-2xl text-cyan-400 font-['VT323']">
         <span>SCORE: {score}</span>
-        <p>CAMERA_Y: {cameraYOffset.toFixed(2)}</p>
+        <p>CAMERA_Y_OFFSET: {cameraYOffset.toFixed(2)}</p>
         <span>LIVES: {'<'.repeat(lives).padEnd(INITIAL_LIVES, ' ')}</span>
     </div>
 );
@@ -79,8 +79,8 @@ const App: React.FC = () => {
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(INITIAL_LIVES);
   const [isRendererReady, setIsRendererReady] = useState(false);
-  //const [cameraYOffset, setCameraYOffset] = useState(0);
-  const cameraYOffset = 0;
+  const [cameraYOffset, setCameraYOffset] = useState(0);
+  // const cameraYOffset = 0;
 
   const player = useRef<Player>({
     id: 1,
@@ -125,7 +125,20 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!canvasRef.current) return;
-    const renderer = new WebGPURenderer(canvasRef.current);
+    const canvas = canvasRef.current;
+
+    const devicePixelRatio = window.devicePixelRatio || 1;
+    canvas.width = GAME_WIDTH * devicePixelRatio;
+    canvas.height = GAME_HEIGHT * devicePixelRatio;
+
+    // these 2 lines below ensure the high dpi screen is mapped to the 'logically' smaller size of the canvas on web browser.
+    // if these 2 are not set, then the canvas will show only partial render of the scene.
+    // I thought it should be the same as what is set in the css but that does not seems to have worked. 
+    canvas.style.width = `${GAME_WIDTH}px`;
+    canvas.style.height = `${GAME_HEIGHT}px`;
+    
+
+    const renderer = new WebGPURenderer(canvas);
     renderer.init().then((success) => {
       if (success) {
         rendererRef.current = renderer;
@@ -339,14 +352,14 @@ const App: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       keysPressed.current[e.key] = true;
 
-      //if (e.key === 'ArrowUp') {
-      //  e.preventDefault();
-      //  setCameraYOffset(o => o + 30);
-      //}
-      //if (e.key === 'ArrowDown') {
-      // e.preventDefault();
-      //  setCameraYOffset(o => o - 30);
-      //}
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setCameraYOffset(o => o + 30);
+      }
+      if (e.key === 'ArrowDown') {
+       e.preventDefault();
+        setCameraYOffset(o => o - 30);
+      }
     };
     const handleKeyUp = (e: KeyboardEvent) => { keysPressed.current[e.key] = false; };
     window.addEventListener('keydown', handleKeyDown);

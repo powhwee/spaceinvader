@@ -283,15 +283,15 @@ export class WebGPURenderer {
 
     private updateCamera(cameraYOffset: number) {
         const fieldOfView = 60 * Math.PI / 180;
-        const aspect = GAME_WIDTH / GAME_HEIGHT;
+        const aspect = this.canvas.width / this.canvas.height;
         const zNear = 1;
         const zFar = 2000;
         mat4.perspective(this.projectionMatrix, fieldOfView, aspect, zNear, zFar);
 
         const eye = vec3.fromValues(
             GAME_WIDTH / 2,
-            120,
-            600
+            120 + cameraYOffset,
+            600 
         );
         const center = vec3.fromValues(
             GAME_WIDTH / 2,
