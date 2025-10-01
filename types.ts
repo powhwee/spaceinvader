@@ -29,6 +29,7 @@ export type Laser = GameObject;
 export type Particle = GameObject & {
   velocity: Position;
   life: number; // time in seconds
+  initialLife: number;
   color: number[];
 };
 

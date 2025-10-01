@@ -56,12 +56,15 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) normal: vec3<f32>,
+    @location(2) age: f32,
 };
 
 struct InstanceInput {
     model_pos: vec3<f32>,
     model_size: vec3<f32>,
     color: vec4<f32>,
+    life: f32,
+    initialLife: f32,
 };
 
 struct Globals {
@@ -87,6 +90,7 @@ fn main(
     out.position = globals.view_proj * world_pos;
     out.color = instance.color;
     out.normal = vert.normal;
+    out.age = 0.0; // Not a particle, so age is 0
     return out;
 }
 `;
@@ -95,7 +99,8 @@ export const invaderFsCode = `
 @fragment
 fn main(
     @location(0) color: vec4<f32>,
-    @location(1) normal: vec3<f32>
+    @location(1) normal: vec3<f32>,
+    @location(2) age: f32
 ) -> @location(0) vec4<f32> {
     let light_direction = normalize(vec3<f32>(0.3, 0.6, 0.7));
     let diffuse_strength = max(dot(normal, light_direction), 0.25);

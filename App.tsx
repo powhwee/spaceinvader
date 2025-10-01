@@ -110,16 +110,19 @@ const App: React.FC = () => {
       const angle = Math.random() * Math.PI * 2;
       const pitch = Math.random() * Math.PI - Math.PI / 2;
       const speed = Math.random() * 150 + 50; // pixels per second
+      const life = Math.random() * 0.5 + 0.5; // 0.5 to 1.0 seconds lifetime
+
       particles.current.push({
         id: performance.now() + Math.random(),
         position: { x: position.x, y: position.y, z: position.z },
-        size: { width: 3, height: 3, depth: 3 },
+        size: { width: 15, height: 15, depth: 15 },
         velocity: {
           x: Math.cos(angle) * Math.cos(pitch) * speed,
           y: Math.sin(pitch) * speed,
           z: Math.sin(angle) * Math.cos(pitch) * speed,
         },
-        life: Math.random() * 0.5 + 0.5, // 0.5 to 1.0 seconds lifetime
+        life: life,
+        initialLife: life,
         color: color,
         modelType: ModelType.Cube,
       });
@@ -239,7 +242,7 @@ const App: React.FC = () => {
             y: p.velocity.y + gravity * deltaTime,
         },
         life: p.life - deltaTime,
-    })).filter(p => p.life > 0 && p.position.y > 0);
+    })).filter(p => p.life > 0);
 
     // Move invaders
     let invadersHitWall = false;
@@ -299,7 +302,7 @@ const App: React.FC = () => {
               z: invader.position.z + invader.size.depth / 2,
           };
           const explosionColor = invaderColors[invader.type % invaderColors.length];
-          createExplosion(explosionPosition, 50, explosionColor);
+          createExplosion(explosionPosition, 1000, explosionColor);
         }
       });
     });
@@ -319,7 +322,7 @@ const App: React.FC = () => {
             y: player.current.position.y + player.current.size.height / 2,
             z: player.current.position.z + player.current.size.depth / 2,
         };
-        createExplosion(explosionPosition, 100, [1.0, 1.0, 1.0, 1.0]);
+        createExplosion(explosionPosition, 100, [1.0, 1.0, 0.8, 1.0]);
 
         setLives(l => {
           const newLives = l - 1;

@@ -13,8 +13,20 @@ import {
 } from './models';
 
 const MAX_INSTANCES = 4096;
-// pos(vec3f), size(vec3f), color(vec4f) -> 12 + 12 + 16 = 40 bytes
-const INSTANCE_BYTE_SIZE = 48; 
+
+// WGSL struct memory layout for storage buffers:
+// vec3f is aligned to 16 bytes (like vec4f)
+// f32 is aligned to 4 bytes
+// The entire struct must be a multiple of the largest member's alignment (16).
+//
+// model_pos: vec3f -> offset 0, size 12. Pad 4 bytes. Next offset: 16
+// model_size: vec3f -> offset 16, size 12. Pad 4 bytes. Next offset: 32
+// color: vec4f -> offset 32, size 16. Next offset: 48
+// life: f32 -> offset 48, size 4. Next offset: 52
+// initialLife: f32 -> offset 52, size 4. Next offset: 56
+// End of data is 56. The struct must be padded to a multiple of 16.
+// The next multiple of 16 after 56 is 64.
+const INSTANCE_BYTE_SIZE = 64;
 
 type Model = {
     vertices: Float32Array;
@@ -162,7 +174,33 @@ export class WebGPURenderer {
         this.pipelines = new Map<ModelType, GPURenderPipeline>();
         const pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
 
-        const createPipeline = (vsCode: string, fsCode: string) => {
+        const defaultBlendState: GPUBlendState = {
+            color: {
+                srcFactor: 'src-alpha',
+                dstFactor: 'one-minus-src-alpha',
+                operation: 'add',
+            },
+            alpha: {
+                srcFactor: 'one',
+                dstFactor: 'one-minus-src-alpha',
+                operation: 'add',
+            }
+        };
+
+        const additiveBlendState: GPUBlendState = {
+            color: {
+                srcFactor: 'src-alpha', // or 'one' for even brighter effect
+                dstFactor: 'one',
+                operation: 'add',
+            },
+            alpha: {
+                srcFactor: 'one',
+                dstFactor: 'one',
+                operation: 'add',
+            }
+        };
+
+        const createPipeline = (vsCode: string, fsCode: string, blend: GPUBlendState) => {
             const vsModule = this.device.createShaderModule({ code: vsCode });
             const fsModule = this.device.createShaderModule({ code: fsCode });
 
@@ -184,18 +222,7 @@ export class WebGPURenderer {
                     entryPoint: 'main',
                     targets: [{ 
                         format: this.presentationFormat,
-                        blend: {
-                            color: {
-                                srcFactor: 'src-alpha',
-                                dstFactor: 'one-minus-src-alpha',
-                                operation: 'add',
-                            },
-                            alpha: {
-                                srcFactor: 'one',
-                                dstFactor: 'one-minus-src-alpha',
-                                operation: 'add',
-                            }
-                        }
+                        blend: blend
                     }],
                 },
                 primitive: { topology: 'triangle-list' },
@@ -207,10 +234,13 @@ export class WebGPURenderer {
             });
         }
 
-        this.pipelines.set(ModelType.Cube, createPipeline(cubeVsCode, cubeFsCode));
-        this.pipelines.set(ModelType.Invader, createPipeline(invaderVsCode, invaderFsCode));
-        this.pipelines.set(ModelType.Laser, createPipeline(laserVsCode, laserFsCode));
-        this.pipelines.set(ModelType.PlayerShip, createPipeline(playerShipVsCode, playerShipFsCode));
+        // Create a separate pipeline for particles with additive blending
+        this.pipelines.set(ModelType.Cube, createPipeline(cubeVsCode, cubeFsCode, additiveBlendState));
+        
+        // Other models use the default alpha blending
+        this.pipelines.set(ModelType.Invader, createPipeline(invaderVsCode, invaderFsCode, defaultBlendState));
+        this.pipelines.set(ModelType.Laser, createPipeline(laserVsCode, laserFsCode, defaultBlendState));
+        this.pipelines.set(ModelType.PlayerShip, createPipeline(playerShipVsCode, playerShipFsCode, defaultBlendState));
 
         return true;
     }
@@ -263,17 +293,22 @@ export class WebGPURenderer {
         }
 
         let instanceCount = 0;
+        const instanceFloatSize = INSTANCE_BYTE_SIZE / 4;
         for (const objects of objectsByModel.values()) {
             for (const obj of objects) {
-                const offset = instanceCount * (INSTANCE_BYTE_SIZE / 4);
+                const offset = instanceCount * instanceFloatSize;
                 if (offset >= this.instanceData.length) continue;
 
                 let color: number[];
-                if ('color' in obj && (obj as Particle).color) {
+                let life = 0.0;
+                let initialLife = 0.0;
+
+                if (obj.modelType === ModelType.Cube && 'initialLife' in obj) { // It's a particle
                     const p = obj as Particle;
-                    const alpha = Math.max(0, p.life * 2);
-                    color = [p.color[0], p.color[1], p.color[2], Math.min(p.color[3], alpha)];
-                } else if (obj.modelType === ModelType.PlayerShip || obj.modelType === ModelType.Cube) {
+                    color = p.color; // The initial color is passed in
+                    life = p.life;
+                    initialLife = p.initialLife;
+                } else if (obj.modelType === ModelType.PlayerShip) {
                     color = playerColor;
                 } else if (obj.modelType === ModelType.Invader) {
                     color = invaderColors[(obj as Invader).type % invaderColors.length];
@@ -283,26 +318,31 @@ export class WebGPURenderer {
                     } else {
                         color = invaderLaserColor;
                     }
-                } else {
-                    color = [1, 1, 1, 1]; // Default white
+                } else { // Default for non-particle cubes
+                    color = [1, 1, 1, 1];
                 }
 
                 const worldY = obj.position.y + obj.size.height / 2;
-                this.instanceData[offset + 0] = obj.position.x + obj.size.width / 2;
-                this.instanceData[offset + 1] = worldY;
-                this.instanceData[offset + 2] = obj.position.z + obj.size.depth / 2;
-                this.instanceData[offset + 4] = obj.size.width;
-                this.instanceData[offset + 5] = obj.size.height;
-                this.instanceData[offset + 6] = obj.size.depth;
-                this.instanceData[offset + 8] = color[0];
-                this.instanceData[offset + 9] = color[1];
-                this.instanceData[offset + 10] = color[2];
-                this.instanceData[offset + 11] = color[3];
+                
+                // Correctly populate the buffer according to WGSL std140/storage buffer layout rules
+                let float_offset = offset;
+                this.instanceData.set([obj.position.x + obj.size.width / 2, worldY, obj.position.z + obj.size.depth / 2], float_offset); // model_pos
+                float_offset += 4; // Advance past vec3 + padding
+
+                this.instanceData.set([obj.size.width, obj.size.height, obj.size.depth], float_offset); // model_size
+                float_offset += 4; // Advance past vec3 + padding
+
+                this.instanceData.set(color, float_offset); // color
+                float_offset += 4; // Advance past vec4
+
+                this.instanceData[float_offset++] = life;
+                this.instanceData[float_offset++] = initialLife;
+
                 instanceCount++;
             }
         }
 
-        this.device.queue.writeBuffer(this.instanceBuffer, 0, this.instanceData, 0, instanceCount * (INSTANCE_BYTE_SIZE / 4));
+        this.device.queue.writeBuffer(this.instanceBuffer, 0, this.instanceData, 0, instanceCount * instanceFloatSize);
 
         const commandEncoder = this.device.createCommandEncoder();
         const textureView = this.context.getCurrentTexture().createView();
