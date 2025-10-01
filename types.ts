@@ -1,3 +1,10 @@
+export enum ModelType {
+  Cube,
+  PlayerShip,
+  Invader,
+  Laser,
+}
+
 export type Position = {
   x: number;
   y: number;
@@ -8,9 +15,9 @@ export type GameObject = {
   id: number;
   position: Position;
   size: { width: number; height: number; depth: number };
+  modelType: ModelType;
 };
 
-// FIX: Export the 'Player' type as an alias of 'GameObject' to resolve the import error.
 export type Player = GameObject;
 
 export type Invader = GameObject & {

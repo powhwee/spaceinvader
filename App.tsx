@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameState } from './types';
+import { GameState, ModelType } from './types';
 import type { Player, Invader, Laser, Particle, Position } from './types';
 import {
   GAME_WIDTH, GAME_HEIGHT, 
@@ -24,6 +24,7 @@ const createInvaders = (): Invader[] => {
         },
         size: { width: INVADER_WIDTH, height: INVADER_HEIGHT, depth: INVADER_DEPTH },
         type: row,
+        modelType: ModelType.Invader,
       });
     }
   }
@@ -86,6 +87,7 @@ const App: React.FC = () => {
     id: 1,
     position: { x: (GAME_WIDTH - PLAYER_WIDTH) / 2, y: PLAYER_Y_OFFSET, z: 0 },
     size: { width: PLAYER_WIDTH, height: PLAYER_HEIGHT, depth: PLAYER_DEPTH },
+    modelType: ModelType.PlayerShip,
   });
   const invaders = useRef<Invader[]>(createInvaders());
   const playerLasers = useRef<Laser[]>([]);
@@ -119,6 +121,7 @@ const App: React.FC = () => {
         },
         life: Math.random() * 0.5 + 0.5, // 0.5 to 1.0 seconds lifetime
         color: color,
+        modelType: ModelType.Cube,
       });
     }
   }, []);
@@ -154,6 +157,7 @@ const App: React.FC = () => {
       id: 1,
       position: { x: (GAME_WIDTH - PLAYER_WIDTH) / 2, y: PLAYER_Y_OFFSET, z: 0 },
       size: { width: PLAYER_WIDTH, height: PLAYER_HEIGHT, depth: PLAYER_DEPTH },
+      modelType: ModelType.PlayerShip,
     };
     invaders.current = createInvaders();
     playerLasers.current = [];
@@ -212,6 +216,7 @@ const App: React.FC = () => {
             z: player.current.position.z 
         },
         size: { width: LASER_WIDTH, height: LASER_HEIGHT, depth: LASER_DEPTH },
+        modelType: ModelType.Laser,
       });
       audioManagerRef.current?.play(SoundEffect.PlayerShoot);
     }
@@ -264,7 +269,8 @@ const App: React.FC = () => {
               y: invader.position.y,
               z: invader.position.z
             },
-          size: { width: LASER_WIDTH, height: LASER_HEIGHT, depth: LASER_DEPTH }
+          size: { width: LASER_WIDTH, height: LASER_HEIGHT, depth: LASER_DEPTH },
+          modelType: ModelType.Laser,
         });
         audioManagerRef.current?.play(SoundEffect.InvaderShoot);
       }
@@ -399,4 +405,4 @@ const App: React.FC = () => {
   );
 };
 
-export default App;
+export default App;App;
