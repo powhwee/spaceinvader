@@ -5,7 +5,12 @@ import type { Player, Invader, Laser, Particle, GameObject } from './types';
 import { ModelType } from './types';
 import { GAME_WIDTH, GAME_HEIGHT } from './constants';
 import { mat4, vec3 } from 'gl-matrix';
-import { cubeVertices, cubeIndices, playerShipVertices, playerShipIndices, invaderVertices, invaderIndices, laserVertices, laserIndices } from './models';
+import {
+    cubeVertices, cubeIndices, cubeVsCode, cubeFsCode,
+    playerShipVertices, playerShipIndices, playerShipVsCode, playerShipFsCode,
+    invaderVertices, invaderIndices, invaderVsCode, invaderFsCode,
+    laserVertices, laserIndices, laserVsCode, laserFsCode
+} from './models';
 
 const MAX_INSTANCES = 4096;
 // pos(vec3f), size(vec3f), color(vec4f) -> 12 + 12 + 16 = 40 bytes
@@ -29,69 +34,6 @@ const playerColor = [0, 255/255, 255/255, 1.0];
 const playerLaserColor = [52/255, 211/255, 153/255, 1.0];
 const invaderLaserColor = [239/255, 68/255, 68/255, 1.0];
 
-const vsCode = `
-struct VertexInput {
-    @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-};
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) color: vec4<f32>,
-    @location(1) normal: vec3<f32>,
-};
-
-struct InstanceInput {
-    model_pos: vec3<f32>,
-    model_size: vec3<f32>,
-    color: vec4<f32>,
-};
-
-struct Globals {
-    view_proj: mat4x4<f32>,
-};
-
-@group(0) @binding(0) var<uniform> globals: Globals;
-@group(0) @binding(1) var<storage, read> instances: array<InstanceInput>;
-
-@vertex
-fn main(
-    @builtin(instance_index) instance_index : u32,
-    vert: VertexInput
-) -> VertexOutput {
-    let instance = instances[instance_index];
-    
-    let world_pos = vec4<f32>(
-        (vert.position * instance.model_size) + instance.model_pos,
-        1.0
-    );
-    
-    var out: VertexOutput;
-    out.position = globals.view_proj * world_pos;
-    out.color = instance.color;
-    out.normal = vert.normal; // Pass the normal for lighting calculations
-    return out;
-}
-`;
-
-const fsCode = `
-@fragment
-fn main(
-    @location(0) color: vec4<f32>,
-    @location(1) normal: vec3<f32>
-) -> @location(0) vec4<f32> {
-    // A new light direction that works well with our camera angle.
-    // It shines from slightly to the side, from above, and from the front.
-    let light_direction = normalize(vec3<f32>(0.3, 0.6, 0.7));
-
-    // A minimum brightness of 0.25 ensures cubes are never completely black (ambient light).
-    let diffuse_strength = max(dot(normal, light_direction), 0.25);
-    
-    let final_color = color.rgb * diffuse_strength;
-    return vec4<f32>(final_color, color.a);
-}
-`;
-
 type GameObjects = {
     player: Player;
     invaders: Invader[];
@@ -104,7 +46,7 @@ export class WebGPURenderer {
     private canvas: HTMLCanvasElement;
     private device!: GPUDevice;
     private context!: GPUCanvasContext;
-    private pipeline!: GPURenderPipeline;
+    private pipelines!: Map<ModelType, GPURenderPipeline>;
     private presentationFormat!: GPUTextureFormat;
     private depthTexture!: GPUTexture;
 
@@ -155,11 +97,8 @@ export class WebGPURenderer {
             usage: GPUTextureUsage.RENDER_ATTACHMENT,
         });
 
-        const vsModule = this.device.createShaderModule({ code: vsCode });
-        const fsModule = this.device.createShaderModule({ code: fsCode });
-
+        // Create models
         this.models = new Map<ModelType, Model>();
-
         const modelData = [
             { type: ModelType.Cube, vertices: cubeVertices, indices: cubeIndices },
             { type: ModelType.PlayerShip, vertices: playerShipVertices, indices: playerShipIndices },
@@ -192,6 +131,7 @@ export class WebGPURenderer {
             });
         }
         
+        // Create buffers
         this.uniformBuffer = this.device.createBuffer({
             size: 64, // mat4x4<f32> is 4*4*4 = 64 bytes
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -202,6 +142,7 @@ export class WebGPURenderer {
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         });
         
+        // Create bind group
         const bindGroupLayout = this.device.createBindGroupLayout({
             entries: [
                 { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
@@ -217,47 +158,59 @@ export class WebGPURenderer {
             ]
         });
 
+        // Create pipelines
+        this.pipelines = new Map<ModelType, GPURenderPipeline>();
         const pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
-        
-        this.pipeline = this.device.createRenderPipeline({
-            layout: pipelineLayout,
-            vertex: {
-                module: vsModule,
-                entryPoint: 'main',
-                buffers: [{
-                    arrayStride: 6 * 4, // 3 floats for position, 3 for normal
-                    attributes: [
-                        { shaderLocation: 0, offset: 0, format: 'float32x3' }, // position
-                        { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }, // normal
-                    ],
-                }],
-            },
-            fragment: {
-                module: fsModule,
-                entryPoint: 'main',
-                targets: [{ 
-                    format: this.presentationFormat,
-                    blend: {
-                        color: {
-                            srcFactor: 'src-alpha',
-                            dstFactor: 'one-minus-src-alpha',
-                            operation: 'add',
-                        },
-                        alpha: {
-                            srcFactor: 'one',
-                            dstFactor: 'one-minus-src-alpha',
-                            operation: 'add',
+
+        const createPipeline = (vsCode: string, fsCode: string) => {
+            const vsModule = this.device.createShaderModule({ code: vsCode });
+            const fsModule = this.device.createShaderModule({ code: fsCode });
+
+            return this.device.createRenderPipeline({
+                layout: pipelineLayout,
+                vertex: {
+                    module: vsModule,
+                    entryPoint: 'main',
+                    buffers: [{
+                        arrayStride: 6 * 4, // 3 floats for position, 3 for normal
+                        attributes: [
+                            { shaderLocation: 0, offset: 0, format: 'float32x3' }, // position
+                            { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }, // normal
+                        ],
+                    }],
+                },
+                fragment: {
+                    module: fsModule,
+                    entryPoint: 'main',
+                    targets: [{ 
+                        format: this.presentationFormat,
+                        blend: {
+                            color: {
+                                srcFactor: 'src-alpha',
+                                dstFactor: 'one-minus-src-alpha',
+                                operation: 'add',
+                            },
+                            alpha: {
+                                srcFactor: 'one',
+                                dstFactor: 'one-minus-src-alpha',
+                                operation: 'add',
+                            }
                         }
-                    }
-                }],
-            },
-            primitive: { topology: 'triangle-list' },
-            depthStencil: {
-                depthWriteEnabled: true,
-                depthCompare: 'less',
-                format: 'depth24plus',
-            },
-        });
+                    }],
+                },
+                primitive: { topology: 'triangle-list' },
+                depthStencil: {
+                    depthWriteEnabled: true,
+                    depthCompare: 'less',
+                    format: 'depth24plus',
+                },
+            });
+        }
+
+        this.pipelines.set(ModelType.Cube, createPipeline(cubeVsCode, cubeFsCode));
+        this.pipelines.set(ModelType.Invader, createPipeline(invaderVsCode, invaderFsCode));
+        this.pipelines.set(ModelType.Laser, createPipeline(laserVsCode, laserFsCode));
+        this.pipelines.set(ModelType.PlayerShip, createPipeline(playerShipVsCode, playerShipFsCode));
 
         return true;
     }
@@ -370,14 +323,15 @@ export class WebGPURenderer {
         };
 
         const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
-        passEncoder.setPipeline(this.pipeline);
         passEncoder.setBindGroup(0, this.uniformBindGroup);
 
         let drawnInstances = 0;
         for (const [modelType, objects] of objectsByModel.entries()) {
             const model = this.models.get(modelType);
-            if (!model || objects.length === 0) continue;
+            const pipeline = this.pipelines.get(modelType);
+            if (!model || !pipeline || objects.length === 0) continue;
 
+            passEncoder.setPipeline(pipeline);
             passEncoder.setVertexBuffer(0, model.vertexBuffer);
             passEncoder.setIndexBuffer(model.indexBuffer, 'uint16');
             passEncoder.drawIndexed(model.indices.length, objects.length, 0, 0, drawnInstances);

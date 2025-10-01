@@ -1,4 +1,3 @@
-
 // A simple cuboid for the laser
 export const laserVertices = new Float32Array([
     //-z
@@ -41,3 +40,61 @@ export const laserIndices = new Uint16Array([
     16, 17, 18, 16, 18, 19, // -y
     20, 21, 22, 20, 22, 23, // +y
 ]);
+
+export const laserVsCode = `
+struct VertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+    @location(1) normal: vec3<f32>,
+};
+
+struct InstanceInput {
+    model_pos: vec3<f32>,
+    model_size: vec3<f32>,
+    color: vec4<f32>,
+};
+
+struct Globals {
+    view_proj: mat4x4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> globals: Globals;
+@group(0) @binding(1) var<storage, read> instances: array<InstanceInput>;
+
+@vertex
+fn main(
+    @builtin(instance_index) instance_index : u32,
+    vert: VertexInput
+) -> VertexOutput {
+    let instance = instances[instance_index];
+    
+    let world_pos = vec4<f32>(
+        (vert.position * instance.model_size) + instance.model_pos,
+        1.0
+    );
+    
+    var out: VertexOutput;
+    out.position = globals.view_proj * world_pos;
+    out.color = instance.color;
+    out.normal = vert.normal;
+    return out;
+}
+`;
+
+export const laserFsCode = `
+@fragment
+fn main(
+    @location(0) color: vec4<f32>,
+    @location(1) normal: vec3<f32>
+) -> @location(0) vec4<f32> {
+    let light_direction = normalize(vec3<f32>(0.3, 0.6, 0.7));
+    let diffuse_strength = max(dot(normal, light_direction), 0.25);
+    let final_color = color.rgb * diffuse_strength;
+    return vec4<f32>(final_color, color.a);
+}
+`;
