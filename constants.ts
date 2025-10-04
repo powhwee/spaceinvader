@@ -3,8 +3,8 @@ export const GAME_WIDTH = 800;
 export const GAME_HEIGHT = 600;
 
 export const PLAYER_WIDTH = 50;
-export const PLAYER_HEIGHT = 20;
-export const PLAYER_DEPTH = 20;
+export const PLAYER_HEIGHT = 82;
+export const PLAYER_DEPTH = 50;
 export const PLAYER_SPEED = 350; // pixels per second
 export const PLAYER_Y_OFFSET = 30;
 
