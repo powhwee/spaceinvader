@@ -217,16 +217,29 @@ export class WebGPURenderer {
 
             this.models.set(ModelType.PlayerShip, { vertices: combinedVertices, indices, vertexBuffer, indexBuffer });
 
-            // 2. Texture
-            const image = gltf.images[0];
-            const texture = this.device.createTexture({
-                size: [image.width, image.height, 1],
-                format: 'rgba8unorm',
-                usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-            });
-            this.device.queue.copyExternalImageToTexture({ source: image }, { texture: texture }, [image.width, image.height]);
+            // 2. Textures & Sampler
+            const materialIndex = primitive.material;
+            const material = gltf.json.materials[materialIndex];
+            const pbrInfo = material.pbrMetallicRoughness;
 
-            // 3. Sampler
+            // Function to load a texture by its definition
+            const loadTexture = (textureInfo) => {
+                const textureIndex = textureInfo.index;
+                const imageIndex = gltf.json.textures[textureIndex].source;
+                const image = gltf.images[imageIndex];
+                if (!image) { throw new Error("Could not find texture image."); }
+
+                const gpuTexture = this.device.createTexture({
+                    size: [image.width, image.height, 1],
+                    format: 'rgba8unorm',
+                    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+                });
+                this.device.queue.copyExternalImageToTexture({ source: image }, { texture: gpuTexture }, [image.width, image.height]);
+                return gpuTexture;
+            };
+            
+            const baseColorTexture = loadTexture(pbrInfo.baseColorTexture);
+            const metallicRoughnessTexture = loadTexture(pbrInfo.metallicRoughnessTexture);
             const sampler = this.device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
 
             // 4. Pipeline & Bind Group
@@ -235,7 +248,8 @@ export class WebGPURenderer {
                     { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
                     { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
                     { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
-                    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: {} },
+                    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: {} }, // Base Color
+                    { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: {} }, // Metallic Roughness
                 ]
             });
 
@@ -245,7 +259,8 @@ export class WebGPURenderer {
                     { binding: 0, resource: { buffer: this.uniformBuffer } },
                     { binding: 1, resource: { buffer: this.instanceBuffer } },
                     { binding: 2, resource: sampler },
-                    { binding: 3, resource: texture.createView() },
+                    { binding: 3, resource: baseColorTexture.createView() },
+                    { binding: 4, resource: metallicRoughnessTexture.createView() },
                 ]
             });
 
