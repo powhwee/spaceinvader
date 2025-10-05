@@ -144,15 +144,22 @@ const App: React.FC = () => {
     canvas.style.height = `${GAME_HEIGHT}px`;
     
 
-    const renderer = new WebGPURenderer(canvas);
-    renderer.init().then((success) => {
-      if (success) {
-        rendererRef.current = renderer;
-        setIsRendererReady(true);
-      } else {
-        console.error("Failed to initialize WebGPU renderer.");
-      }
+    // Defer renderer initialization to the next frame.
+    // This helps prevent a race condition on Safari where the renderer might
+    // initialize before the browser has fully processed the canvas's new dimensions.
+    const animationFrameHandle = requestAnimationFrame(() => {
+      const renderer = new WebGPURenderer(canvas);
+      renderer.init().then((success) => {
+        if (success) {
+          rendererRef.current = renderer;
+          setIsRendererReady(true);
+        } else {
+          console.error("Failed to initialize WebGPU renderer.");
+        }
+      });
     });
+
+    return () => cancelAnimationFrame(animationFrameHandle);
   }, []);
   
   const resetGame = useCallback(() => {
