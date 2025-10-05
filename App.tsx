@@ -349,7 +349,7 @@ const App: React.FC = () => {
             playerLasers: playerLasers.current,
             invaderLasers: invaderLasers.current,
             particles: particles.current,
-        }, cameraYOffset);
+        }, cameraYOffset, deltaTime);
     }
 
     animationFrameId.current = requestAnimationFrame(gameLoop);

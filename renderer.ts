@@ -11,10 +11,11 @@ import {
     invaderVertices, invaderIndices, invaderShader,
     laserVertices, laserIndices, laserVsCode, laserFsCode
 } from './models';
+import { createFlameSystem, flameShader } from './models/flames';
 import { load } from '@loaders.gl/core';
 import { GLTFLoader } from '@loaders.gl/gltf';
 
-const MAX_INSTANCES = 4096;
+const MAX_INSTANCES = 5096;
 const INSTANCE_BYTE_SIZE = 64;
 
 type Model = {
@@ -52,6 +53,7 @@ export class WebGPURenderer {
 
     private models!: Map<ModelType, Model>;
     private uniformBuffer!: GPUBuffer;
+    private flameUniformBuffer!: GPUBuffer;
     private instanceBuffer!: GPUBuffer;
     private instanceData: Float32Array;
 
@@ -62,6 +64,14 @@ export class WebGPURenderer {
     private playerShipPipeline!: GPURenderPipeline;
     private nonTexturedBindGroup!: GPUBindGroup;
     private playerShipBindGroup!: GPUBindGroup;
+    private flamePipeline!: GPURenderPipeline;
+    private flameBindGroup!: GPUBindGroup;
+
+    private flameSystem!: {
+        flameInstanceBuffer: GPUBuffer;
+        updateFlames: (deltaTime: number, modelMatrix: mat4) => void;
+        getActiveFlameCount: () => number;
+    };
 
     private projectionMatrix: mat4;
     private viewMatrix: mat4;
@@ -106,6 +116,10 @@ export class WebGPURenderer {
         // --- Buffers ---
         this.uniformBuffer = this.device.createBuffer({
             size: 80, // mat4x4<f32> (64) + time f32 (4) + padding (12)
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+        this.flameUniformBuffer = this.device.createBuffer({
+            size: 128, // 2 * mat4x4<f32>
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
         this.instanceBuffer = this.device.createBuffer({
@@ -256,6 +270,35 @@ export class WebGPURenderer {
             depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' },
         });
 
+        // --- Flame System ---
+        this.flameSystem = createFlameSystem(this.device);
+        const flameBindGroupLayout = this.device.createBindGroupLayout({ entries: [ { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } } ] });
+        this.flameBindGroup = this.device.createBindGroup({ layout: flameBindGroupLayout, entries: [{ binding: 1, resource: { buffer: this.flameUniformBuffer } }] });
+        const flamePipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [flameBindGroupLayout] });
+                this.flamePipeline = this.device.createRenderPipeline({
+            layout: flamePipelineLayout,
+            vertex: {
+                module: this.device.createShaderModule({ code: flameShader }),
+                entryPoint: 'vs_main',
+                buffers: [{
+                    arrayStride: 8 * 4, // 3 pos, 1 size, 4 color
+                    stepMode: 'instance',
+                    attributes: [
+                        { shaderLocation: 0, offset: 0, format: 'float32x3' }, // inst_pos
+                        { shaderLocation: 1, offset: 3 * 4, format: 'float32' },   // inst_size
+                        { shaderLocation: 2, offset: 4 * 4, format: 'float32x4' }, // inst_color
+                    ],
+                }],
+            },
+            fragment: {
+                module: this.device.createShaderModule({ code: flameShader }),
+                entryPoint: 'fs_main',
+                targets: [{ format: this.presentationFormat, blend: additiveBlend }],
+            },
+            primitive: { topology: 'triangle-list' },
+            depthStencil: { depthWriteEnabled: false, depthCompare: 'less', format: 'depth24plus' },
+        });
+
         return true;
     }
 
@@ -269,13 +312,20 @@ export class WebGPURenderer {
         mat4.multiply(this.viewProjectionMatrix, this.projectionMatrix, this.viewMatrix);
     }
 
-    render(gameObjects: GameObjects, cameraYOffset: number): void {
+    render(gameObjects: GameObjects, cameraYOffset: number, deltaTime: number): void {
         if (!this.device || !this.models) return;
 
         this.updateCamera(cameraYOffset);
         this.device.queue.writeBuffer(this.uniformBuffer, 0, this.viewProjectionMatrix as Float32Array);
         this.device.queue.writeBuffer(this.uniformBuffer, 64, new Float32Array([performance.now() / 1000]));
+        this.device.queue.writeBuffer(this.flameUniformBuffer, 0, this.viewProjectionMatrix as Float32Array);
+        this.device.queue.writeBuffer(this.flameUniformBuffer, 64, this.viewMatrix as Float32Array);
 
+        const playerModelMatrix = mat4.create();
+        mat4.translate(playerModelMatrix, playerModelMatrix, [gameObjects.player.position.x + gameObjects.player.size.width / 2, gameObjects.player.position.y + gameObjects.player.size.height / 2, gameObjects.player.position.z]);
+        mat4.scale(playerModelMatrix, playerModelMatrix, [gameObjects.player.size.width, gameObjects.player.size.height, gameObjects.player.size.depth]);
+
+        this.flameSystem.updateFlames(deltaTime, playerModelMatrix);
 
         const objectsByModel = new Map<ModelType, GameObject[]>();
         const allObjects = [ gameObjects.player, ...gameObjects.invaders, ...gameObjects.playerLasers, ...gameObjects.invaderLasers, ...gameObjects.particles ];
@@ -364,6 +414,14 @@ export class WebGPURenderer {
             passEncoder.drawIndexed(model.indices.length, objects.length, 0, 0, drawnInstances);
             
             drawnInstances += objects.length;
+        }
+
+        const activeFlameCount = this.flameSystem.getActiveFlameCount();
+        if (activeFlameCount > 0) {
+            passEncoder.setPipeline(this.flamePipeline);
+            passEncoder.setBindGroup(0, this.flameBindGroup);
+            passEncoder.setVertexBuffer(0, this.flameSystem.flameInstanceBuffer);
+            passEncoder.draw(6, activeFlameCount, 0, 0);
         }
 
         passEncoder.end();
