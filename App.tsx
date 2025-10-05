@@ -9,7 +9,7 @@ import {
   INITIAL_INVADER_SPEED, INVADER_SPEED_INCREMENT, INVADER_DROP_DOWN_AMOUNT, INVADER_FIRE_CHANCE, INITIAL_LIVES
 } from './constants';
 import { WebGPURenderer } from './renderer';
-import { AudioManager, SoundEffect } from './audio';
+import { AudioManager, SoundEffect, soundFiles } from './audio';
 
 const createInvaders = (): Invader[] => {
   const invaders: Invader[] = [];
@@ -45,21 +45,34 @@ const ScreenOverlay: React.FC<{ children: React.ReactNode, className?: string }>
     </div>
 );
 
-const StartScreen: React.FC<{ onStart: () => void, isReady: boolean }> = ({ onStart, isReady }) => (
-    <ScreenOverlay>
-        <h1 className="text-6xl text-cyan-400 font-title mb-4 animate-pulse">SPACE INVADERS 3D</h1>
-        <p className="text-xl text-green-400 mb-8 max-w-lg">A 3D simulation of a high-stakes arcade classic. Created using Gemini AI. The fate of the render pipeline is in your hands.</p>
-        <p className="text-lg text-gray-400 mb-2">[A][D] or [LEFT][RIGHT] to move. [SPACE] to fire.</p>
-        <p className="text-lg text-gray-400 mb-2">[UP][DOWN] to change camera perspective.</p>
-        <button
-            onClick={onStart}
-            disabled={!isReady}
-            className="mt-4 px-8 py-4 bg-green-500 text-black font-bold text-2xl font-title border-2 border-green-700 hover:bg-green-400 hover:border-green-600 transition-all disabled:bg-gray-600 disabled:cursor-not-allowed"
-        >
-            {isReady ? 'INITIATE' : 'LOADING GPU...'}
-        </button>
-    </ScreenOverlay>
-);
+const StartScreen: React.FC<{ onStart: () => void, isRendererReady: boolean, isAudioPreloaded: boolean }> = ({ onStart, isRendererReady, isAudioPreloaded }) => {
+    const isReady = isRendererReady && isAudioPreloaded;
+    let buttonText = 'LOADING...';
+    if (isRendererReady && !isAudioPreloaded) {
+        buttonText = 'LOADING AUDIO...';
+    } else if (!isRendererReady && isAudioPreloaded) {
+        buttonText = 'LOADING GPU...';
+    }
+    if (isReady) {
+        buttonText = 'INITIATE';
+    }
+
+    return (
+        <ScreenOverlay>
+            <h1 className="text-6xl text-cyan-400 font-title mb-4 animate-pulse">SPACE INVADERS 3D</h1>
+            <p className="text-xl text-green-400 mb-8 max-w-lg">A 3D simulation of a high-stakes arcade classic. Created using Gemini AI. The fate of the render pipeline is in your hands.</p>
+            <p className="text-lg text-gray-400 mb-2">[A][D] or [LEFT][RIGHT] to move. [SPACE] to fire.</p>
+            <p className="text-lg text-gray-400 mb-2">[UP][DOWN] to change camera perspective.</p>
+            <button
+                onClick={onStart}
+                disabled={!isReady}
+                className="mt-4 px-8 py-4 bg-green-500 text-black font-bold text-2xl font-title border-2 border-green-700 hover:bg-green-400 hover:border-green-600 transition-all disabled:bg-gray-600 disabled:cursor-not-allowed"
+            >
+                {buttonText}
+            </button>
+        </ScreenOverlay>
+    );
+};
 
 const GameOverScreen: React.FC<{ score: number; onRestart: () => void }> = ({ score, onRestart }) => (
     <ScreenOverlay>
@@ -80,8 +93,8 @@ const App: React.FC = () => {
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(INITIAL_LIVES);
   const [isRendererReady, setIsRendererReady] = useState(false);
+  const [isAudioPreloaded, setIsAudioPreloaded] = useState(false);
   const [cameraYOffset, setCameraYOffset] = useState(0);
-  // const cameraYOffset = 0;
 
   const player = useRef<Player>({
     id: 1,
@@ -104,6 +117,7 @@ const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<WebGPURenderer | null>(null);
   const audioManagerRef = useRef<AudioManager | null>(null);
+  const soundDataRef = useRef<Map<SoundEffect, ArrayBuffer>>(new Map());
 
   const createExplosion = useCallback((position: Position, count: number, color: number[]) => {
     for (let i = 0; i < count; i++) {
@@ -137,16 +151,9 @@ const App: React.FC = () => {
     canvas.width = GAME_WIDTH * devicePixelRatio;
     canvas.height = GAME_HEIGHT * devicePixelRatio;
 
-    // these 2 lines below ensure the high dpi screen is mapped to the 'logically' smaller size of the canvas on web browser.
-    // if these 2 are not set, then the canvas will show only partial render of the scene.
-    // I thought it should be the same as what is set in the css but that does not seems to have worked. 
     canvas.style.width = `${GAME_WIDTH}px`;
     canvas.style.height = `${GAME_HEIGHT}px`;
     
-
-    // Defer renderer initialization to the next frame.
-    // This helps prevent a race condition on Safari where the renderer might
-    // initialize before the browser has fully processed the canvas's new dimensions.
     const animationFrameHandle = requestAnimationFrame(() => {
       const renderer = new WebGPURenderer(canvas);
       renderer.init().then((success) => {
@@ -160,6 +167,23 @@ const App: React.FC = () => {
     });
 
     return () => cancelAnimationFrame(animationFrameHandle);
+  }, []);
+
+  useEffect(() => {
+    const prefetchAllSounds = async () => {
+        const fetchPromises = Object.entries(soundFiles).map(async ([key, path]) => {
+            try {
+                const response = await fetch(path);
+                const arrayBuffer = await response.arrayBuffer();
+                soundDataRef.current.set(key as SoundEffect, arrayBuffer);
+            } catch (e) {
+                console.error(`Failed to fetch sound: ${key}`, e);
+            }
+        });
+        await Promise.all(fetchPromises);
+        setIsAudioPreloaded(true);
+    };
+    prefetchAllSounds();
   }, []);
   
   const resetGame = useCallback(() => {
@@ -182,8 +206,10 @@ const App: React.FC = () => {
   const startGame = useCallback(async () => {
     if (!audioManagerRef.current) {
       const audioManager = new AudioManager();
-      audioManager.initialize();
-      await audioManager.loadSounds();
+      audioManager.initialize(); // Reverted to synchronous call
+      // Assuming initialization works, proceed with decoding.
+      // The robust solution is the pre-loading, not the complex initialize.
+      await audioManager.decodeSounds(soundDataRef.current);
       audioManagerRef.current = audioManager;
     }
     resetGame();
@@ -405,7 +431,7 @@ const App: React.FC = () => {
       <div className="absolute top-0 left-0 w-full h-full pointer-events-none">
         {gameState !== GameState.Playing && (
           <div className="pointer-events-auto">
-            {gameState === GameState.StartMenu && <StartScreen onStart={startGame} isReady={isRendererReady} />}
+            {gameState === GameState.StartMenu && <StartScreen onStart={startGame} isRendererReady={isRendererReady} isAudioPreloaded={isAudioPreloaded} />}
             {gameState === GameState.GameOver && <GameOverScreen score={score} onRestart={startGame} />}
           </div>
         )}

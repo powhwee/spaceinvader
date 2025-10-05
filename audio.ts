@@ -1,5 +1,3 @@
-// src/audio.ts
-
 /**
  * Enum for sound effect keys to provide type safety and prevent magic strings.
  */
@@ -14,7 +12,7 @@ export enum SoundEffect {
  * A map defining the file paths for each sound effect.
  * You will need to create these sound files and place them in your `public/sounds/` directory.
  */
-const soundFiles: Record<SoundEffect, string> = {
+export const soundFiles: Record<SoundEffect, string> = {
     [SoundEffect.PlayerShoot]: '/sounds/player-shoot.wav',
     [SoundEffect.InvaderKilled]: '/sounds/invader-killed.wav',
     [SoundEffect.PlayerDeath]: '/sounds/player-death.wav',
@@ -38,28 +36,40 @@ export class AudioManager {
         }
     }
 
-    /**
-     * Loads all defined sound effects into memory.
-     * Call this after `initialize`.
-     */
-    public async loadSounds(): Promise<void> {
+    public async decodeSounds(soundData: Map<SoundEffect, ArrayBuffer>): Promise<void> {
         if (!this.audioContext) {
-            console.warn("AudioContext not initialized. Cannot load sounds.");
+            console.warn("AudioContext not initialized. Cannot decode sounds.");
             return;
         }
 
-        const soundPromises = Object.entries(soundFiles).map(async ([key, path]) => {
+        const decodePromises = Array.from(soundData.entries()).map(async ([key, arrayBuffer]) => {
             try {
-                const response = await fetch(path);
-                const arrayBuffer = await response.arrayBuffer();
                 const audioBuffer = await this.audioContext!.decodeAudioData(arrayBuffer);
-                this.soundBuffers.set(key as SoundEffect, audioBuffer);
+                this.soundBuffers.set(key, audioBuffer);
             } catch (e) {
-                console.error(`Failed to load sound: ${key}`, e);
+                console.error(`Failed to decode sound: ${key}`, e);
             }
         });
 
-        await Promise.all(soundPromises);
+        await Promise.all(decodePromises);
+    }
+
+    /**
+     * Loads all defined sound effects into memory by fetching and then decoding them.
+     */
+    public async loadSounds(): Promise<void> {
+        const soundData = new Map<SoundEffect, ArrayBuffer>();
+        const fetchPromises = Object.entries(soundFiles).map(async ([key, path]) => {
+            try {
+                const response = await fetch(path);
+                const arrayBuffer = await response.arrayBuffer();
+                soundData.set(key as SoundEffect, arrayBuffer);
+            } catch (e) {
+                console.error(`Failed to fetch sound: ${key}`, e);
+            }
+        });
+        await Promise.all(fetchPromises);
+        await this.decodeSounds(soundData);
     }
 
     /**
