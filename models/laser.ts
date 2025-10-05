@@ -64,6 +64,7 @@ struct InstanceInput {
 
 struct Globals {
     view_proj: mat4x4<f32>,
+    time: f32,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -91,15 +92,25 @@ fn main(
 `;
 
 export const laserFsCode = `
+struct Globals {
+    view_proj: mat4x4<f32>,
+    time: f32,
+};
+@group(0) @binding(0) var<uniform> globals: Globals;
+
 @fragment
 fn main(
     @location(0) color: vec4<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) age: f32
+    @location(1) normal: vec3<f32>
 ) -> @location(0) vec4<f32> {
-    let light_direction = normalize(vec3<f32>(0.3, 0.6, 0.7));
-    let diffuse_strength = max(dot(normal, light_direction), 0.25);
-    let final_color = color.rgb * diffuse_strength;
+    // Create a pulsating effect using time
+    let pulse_speed = 30.0;
+    // sin() returns -1 to 1, map it to a 0.75 to 1.75 range for intensity
+    let pulse_intensity = 1.25 + 0.5 * sin(globals.time * pulse_speed);
+
+    // Apply the uniform pulsating intensity to the base color
+    let final_color = color.rgb * pulse_intensity;
+
     return vec4<f32>(final_color, color.a);
 }
 `;
