@@ -516,7 +516,7 @@ const App: React.FC = () => {
       <div className="absolute top-0 left-0 w-full h-full">
         {gameState !== GameState.Playing ? (
           <div className="pointer-events-auto">
-            <StartScreen onStart={startGame} isRendererReady={isRendererReady} isAudioPreloaded={isAudioPreloaded} isAudioInitializing={isAudioInitializing} />
+            {gameState === GameState.StartMenu && <StartScreen onStart={startGame} isRendererReady={isRendererReady} isAudioPreloaded={isAudioPreloaded} isAudioInitializing={isAudioInitializing} />}
             {gameState === GameState.GameOver && <GameOverScreen score={score} onRestart={startGame} />}
           </div>
         ) : (
