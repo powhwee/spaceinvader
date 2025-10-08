@@ -24,8 +24,21 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      min-height: 100vh;
+      width: 100vw;
+      /* Use dynamic viewport height to account for mobile browser UI */
+      height: 100dvh;
       background-color: #0a0a0a;
+    }
+    .game-container {
+      /* 
+        This combination ensures the container fits within the #root element,
+        while maintaining its aspect ratio. It will be letterboxed correctly.
+      */
+      width: 100%;
+      height: 100%;
+      max-width: 100%;
+      max-height: 100%;
+      aspect-ratio: 800 / 600;
     }
   </style>
 <script type="importmap">

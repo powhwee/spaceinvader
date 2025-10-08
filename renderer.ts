@@ -105,12 +105,6 @@ export class WebGPURenderer {
             alphaMode: 'premultiplied',
         });
 
-        this.depthTexture = this.device.createTexture({
-            size: [this.canvas.width, this.canvas.height],
-            format: 'depth24plus',
-            usage: GPUTextureUsage.RENDER_ATTACHMENT,
-        });
-
         this.models = new Map<ModelType, Model>();
 
         // --- Buffers ---
@@ -132,7 +126,7 @@ export class WebGPURenderer {
             const gltf = await load('models/playerShip/scene.gltf', GLTFLoader);
             const primitive = gltf.json.meshes[0].primitives[0];
 
-            const getAccessorData = (gltf, accessorIndex) => {
+            const getAccessorData = (gltf: any, accessorIndex: any) => {
                 const accessor = gltf.json.accessors[accessorIndex];
                 const bufferView = gltf.json.bufferViews[accessor.bufferView];
                 const buffer = gltf.buffers[bufferView.buffer];
@@ -143,7 +137,7 @@ export class WebGPURenderer {
                     case 5125: TypedArray = Uint32Array; break; // UNSIGNED_INT
                     default: throw new Error(`Unsupported component type: ${accessor.componentType}`);
                 }
-                const getNumComponents = (type) => {
+                const getNumComponents = (type: string) => {
                     switch (type) {
                         case 'SCALAR': return 1; case 'VEC2': return 2; case 'VEC3': return 3; case 'VEC4': return 4;
                         default: return 1;
@@ -198,7 +192,7 @@ export class WebGPURenderer {
 
             const material = gltf.json.materials[primitive.material];
             const pbrInfo = material.pbrMetallicRoughness;
-            const loadTexture = (textureInfo) => {
+            const loadTexture = (textureInfo: any) => {
                 const image = gltf.images[gltf.json.textures[textureInfo.index].source];
                 if (!image) { throw new Error("Could not find texture image."); }
                 const gpuTexture = this.device.createTexture({ size: [image.width, image.height, 1], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
@@ -303,13 +297,50 @@ export class WebGPURenderer {
     }
 
     private updateCamera(cameraYOffset: number) {
-        const fieldOfView = 60 * Math.PI / 180;
-        const aspect = this.canvas.width / this.canvas.height;
-        mat4.perspective(this.projectionMatrix, fieldOfView, aspect, 1, 2000);
-        const eye = vec3.fromValues(GAME_WIDTH / 2, 120 + cameraYOffset, 600);
+        const cameraDistance = (GAME_WIDTH / 2) / Math.tan((60 * Math.PI / 180) / 2);
+        const eye = vec3.fromValues(GAME_WIDTH / 2, 120 + cameraYOffset, cameraDistance);
         const center = vec3.fromValues(GAME_WIDTH / 2, 290, 0);
         mat4.lookAt(this.viewMatrix, eye, center, vec3.fromValues(0, 1, 0));
         mat4.multiply(this.viewProjectionMatrix, this.projectionMatrix, this.viewMatrix);
+    }
+
+    resize(width: number, height: number) {
+        if (!this.device || (width === 0 || height === 0)) return;
+
+        const devicePixelRatio = window.devicePixelRatio || 1;
+        this.canvas.width = Math.round(width * devicePixelRatio);
+        this.canvas.height = Math.round(height * devicePixelRatio);
+
+        if (this.depthTexture) {
+            this.depthTexture.destroy();
+        }
+
+        this.depthTexture = this.device.createTexture({
+            size: [this.canvas.width, this.canvas.height],
+            format: 'depth24plus',
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+
+        const aspect = width / height;
+        const nativeAspect = 800 / 600;
+
+        // Define the base vertical FOV, which we want to maintain in landscape.
+        const baseVerticalFov = 60 * (Math.PI / 180);
+        let verticalFov = baseVerticalFov;
+
+        // If the screen is narrower than the game's native aspect ratio (e.g., portrait mode)
+        if (aspect < nativeAspect) {
+            // We are constrained by width. We need to adjust the vertical FOV
+            // to ensure the horizontal FOV remains constant and shows the whole game world.
+            // First, calculate the horizontal FOV that corresponds to our base vertical FOV at the native aspect ratio.
+            const baseHorizontalFov = 2 * Math.atan(Math.tan(baseVerticalFov / 2) * nativeAspect);
+            
+            // Now, calculate the new vertical FOV that will produce our desired baseHorizontalFov with the new, narrower aspect ratio.
+            verticalFov = 2 * Math.atan(Math.tan(baseHorizontalFov / 2) / aspect);
+        }
+        // Else (for landscape modes), we just use the baseVerticalFov, and the view will be letterboxed.
+
+        mat4.perspective(this.projectionMatrix, verticalFov, aspect, 1, 2000);
     }
 
     render(gameObjects: GameObjects, cameraYOffset: number, deltaTime: number): void {

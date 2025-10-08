@@ -32,7 +32,7 @@ const createInvaders = (): Invader[] => {
 };
 
 const GameUI: React.FC<{ score: number; lives: number, cameraYOffset: number }> = ({ score, lives, cameraYOffset }) => (
-    <div className="p-4 flex justify-between text-2xl text-cyan-400 font-['VT323']">
+    <div className="p-4 flex justify-between text-2xl text-cyan-400 font-['VT323'] pointer-events-none">
         <span>SCORE: {score}</span>
         <p>CAMERA_Y_OFFSET: {cameraYOffset.toFixed(2)}</p>
         <span>LIVES: {'<'.repeat(lives).padEnd(INITIAL_LIVES, ' ')}</span>
@@ -45,27 +45,25 @@ const ScreenOverlay: React.FC<{ children: React.ReactNode, className?: string }>
     </div>
 );
 
-const StartScreen: React.FC<{ onStart: () => void, isRendererReady: boolean, isAudioPreloaded: boolean }> = ({ onStart, isRendererReady, isAudioPreloaded }) => {
-    const isReady = isRendererReady && isAudioPreloaded;
-    let buttonText = 'LOADING...';
-    if (isRendererReady && !isAudioPreloaded) {
-        buttonText = 'LOADING AUDIO...';
-    } else if (!isRendererReady && isAudioPreloaded) {
-        buttonText = 'LOADING GPU...';
-    }
-    if (isReady) {
+const StartScreen: React.FC<{ onStart: () => void, isRendererReady: boolean, isAudioPreloaded: boolean, isAudioInitializing: boolean }> = ({ onStart, isRendererReady, isAudioPreloaded, isAudioInitializing }) => {
+    const canStart = isRendererReady && isAudioPreloaded;
+    
+    let buttonText = 'LOADING ASSETS...';
+    if (isAudioInitializing) {
+        buttonText = 'INITIALIZING AUDIO...';
+    } else if (canStart) {
         buttonText = 'INITIATE';
     }
 
     return (
         <ScreenOverlay>
-            <h1 className="text-6xl text-cyan-400 font-title mb-4 animate-pulse">SPACE INVADERS 3D</h1>
+            <h1 className="text-5xl text-cyan-400 font-title mb-4 animate-pulse">SPACE INVADERS 3D</h1>
             <p className="text-xl text-green-400 mb-8 max-w-lg">A 3D simulation of a high-stakes arcade classic. Created using Gemini AI. The fate of the render pipeline is in your hands.</p>
             <p className="text-lg text-gray-400 mb-2">[A][D] or [LEFT][RIGHT] to move. [SPACE] to fire.</p>
             <p className="text-lg text-gray-400 mb-2">[UP][DOWN] to change camera perspective.</p>
             <button
                 onClick={onStart}
-                disabled={!isReady}
+                disabled={!canStart || isAudioInitializing}
                 className="mt-4 px-8 py-4 bg-green-500 text-black font-bold text-2xl font-title border-2 border-green-700 hover:bg-green-400 hover:border-green-600 transition-all disabled:bg-gray-600 disabled:cursor-not-allowed"
             >
                 {buttonText}
@@ -87,6 +85,59 @@ const GameOverScreen: React.FC<{ score: number; onRestart: () => void }> = ({ sc
     </ScreenOverlay>
 );
 
+const OnScreenControls: React.FC<{ onButtonPress: (key: string) => void; onButtonRelease: (key: string) => void; }> = ({ onButtonPress, onButtonRelease }) => {
+    const handleTouchStart = (key: string) => (e: React.TouchEvent) => {
+        e.preventDefault();
+        onButtonPress(key);
+    };
+    const handleTouchEnd = (key: string) => (e: React.TouchEvent) => {
+        e.preventDefault();
+        onButtonRelease(key);
+    };
+
+    return (
+        <div className="absolute bottom-0 left-0 right-0 p-4 flex justify-between items-end z-10 pointer-events-auto">
+            {/* Movement and Camera Controls */}
+            <div className="flex flex-col items-center space-y-2">
+                <button
+                    className="w-16 h-16 bg-cyan-500/50 text-white font-bold rounded-full border-2 border-cyan-700/80 flex items-center justify-center"
+                    onTouchStart={handleTouchStart('ArrowUp')} onTouchEnd={handleTouchEnd('ArrowUp')}
+                >
+                    ▲
+                </button>
+                <div className="flex space-x-2">
+                    <button
+                        className="w-16 h-16 bg-cyan-500/50 text-white font-bold rounded-full border-2 border-cyan-700/80 flex items-center justify-center"
+                        onTouchStart={handleTouchStart('ArrowLeft')} onTouchEnd={handleTouchEnd('ArrowLeft')}
+                    >
+                        ◀
+                    </button>
+                    <button
+                        className="w-16 h-16 bg-cyan-500/50 text-white font-bold rounded-full border-2 border-cyan-700/80 flex items-center justify-center"
+                        onTouchStart={handleTouchStart('ArrowDown')} onTouchEnd={handleTouchEnd('ArrowDown')}
+                    >
+                        ▼
+                    </button>
+                    <button
+                        className="w-16 h-16 bg-cyan-500/50 text-white font-bold rounded-full border-2 border-cyan-700/80 flex items-center justify-center"
+                        onTouchStart={handleTouchStart('ArrowRight')} onTouchEnd={handleTouchEnd('ArrowRight')}
+                    >
+                        ▶
+                    </button>
+                </div>
+            </div>
+
+            {/* Fire Button */}
+            <button
+                className="w-24 h-24 bg-green-500/50 text-white font-bold rounded-full border-2 border-green-700/80 flex items-center justify-center text-2xl"
+                onTouchStart={handleTouchStart(' ')} onTouchEnd={handleTouchEnd(' ')}
+            >
+                FIRE
+            </button>
+        </div>
+    );
+};
+
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.StartMenu);
@@ -94,6 +145,9 @@ const App: React.FC = () => {
   const [lives, setLives] = useState(INITIAL_LIVES);
   const [isRendererReady, setIsRendererReady] = useState(false);
   const [isAudioPreloaded, setIsAudioPreloaded] = useState(false);
+  const [isAudioInitialized, setIsAudioInitialized] = useState(false);
+  const [isAudioInitializing, setIsAudioInitializing] = useState(false);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
   const [cameraYOffset, setCameraYOffset] = useState(0);
 
   const player = useRef<Player>({
@@ -115,6 +169,7 @@ const App: React.FC = () => {
   const animationFrameId = useRef<number>(0);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const gameContainerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<WebGPURenderer | null>(null);
   const audioManagerRef = useRef<AudioManager | null>(null);
   const soundDataRef = useRef<Map<SoundEffect, ArrayBuffer>>(new Map());
@@ -144,29 +199,40 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0);
+
     if (!canvasRef.current) return;
-    const canvas = canvasRef.current;
 
-    const devicePixelRatio = window.devicePixelRatio || 1;
-    canvas.width = GAME_WIDTH * devicePixelRatio;
-    canvas.height = GAME_HEIGHT * devicePixelRatio;
+    if (!rendererRef.current) {
+        const renderer = new WebGPURenderer(canvasRef.current);
+        rendererRef.current = renderer;
 
-    canvas.style.width = `${GAME_WIDTH}px`;
-    canvas.style.height = `${GAME_HEIGHT}px`;
-    
-    const animationFrameHandle = requestAnimationFrame(() => {
-      const renderer = new WebGPURenderer(canvas);
-      renderer.init().then((success) => {
-        if (success) {
-          rendererRef.current = renderer;
-          setIsRendererReady(true);
-        } else {
-          console.error("Failed to initialize WebGPU renderer.");
-        }
-      });
+        renderer.init().then((success) => {
+          if (success) {
+            setIsRendererReady(true);
+            if (gameContainerRef.current) {
+                const { width, height } = gameContainerRef.current.getBoundingClientRect();
+                renderer.resize(width, height);
+            }
+          } else {
+            console.error("Failed to initialize WebGPU renderer.");
+          }
+        });
+    }
+
+    const resizeObserver = new ResizeObserver(entries => {
+      if (!entries || entries.length === 0 || !rendererRef.current) return;
+      const { width, height } = entries[0].contentRect;
+      rendererRef.current.resize(width, height);
     });
 
-    return () => cancelAnimationFrame(animationFrameHandle);
+    if (gameContainerRef.current) {
+      resizeObserver.observe(gameContainerRef.current);
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+    };
   }, []);
 
   useEffect(() => {
@@ -185,7 +251,7 @@ const App: React.FC = () => {
     };
     prefetchAllSounds();
   }, []);
-  
+
   const resetGame = useCallback(() => {
     player.current = {
       id: 1,
@@ -204,17 +270,32 @@ const App: React.FC = () => {
   }, []);
   
   const startGame = useCallback(async () => {
-    if (!audioManagerRef.current) {
-      const audioManager = new AudioManager();
-      audioManager.initialize(); // Reverted to synchronous call
-      // Assuming initialization works, proceed with decoding.
-      // The robust solution is the pre-loading, not the complex initialize.
-      await audioManager.decodeSounds(soundDataRef.current);
-      audioManagerRef.current = audioManager;
+    if (isAudioInitializing) return;
+
+    if (audioManagerRef.current && isAudioInitialized) {
+        resetGame();
+        setGameState(GameState.Playing);
+        return;
     }
+
+    setIsAudioInitializing(true);
+
+    const audioManager = audioManagerRef.current ?? new AudioManager();
+    const audioReady = await audioManager.initialize();
+
+    if (audioReady) {
+        await audioManager.decodeSounds(soundDataRef.current);
+        audioManagerRef.current = audioManager;
+        setIsAudioInitialized(true);
+    } else {
+        console.error("Audio could not be initialized.");
+    }
+    
+    setIsAudioInitializing(false);
     resetGame();
     setGameState(GameState.Playing);
-  }, [resetGame]);
+
+  }, [resetGame, isAudioInitialized, isAudioInitializing]);
 
   const checkCollision = (obj1: Player | Laser | Particle, obj2: Player | Laser | Invader) => {
     return (
@@ -227,11 +308,20 @@ const App: React.FC = () => {
     );
   };
 
+  const handleButtonPress = (key: string) => {
+    keysPressed.current[key] = true;
+    if (key === 'ArrowUp') setCameraYOffset(o => o + 30);
+    if (key === 'ArrowDown') setCameraYOffset(o => o - 30);
+  };
+
+  const handleButtonRelease = (key: string) => {
+    keysPressed.current[key] = false;
+  };
+
   const gameLoop = useCallback((currentTime: number) => {
     const deltaTime = (currentTime - lastFrameTime.current) / 1000;
     lastFrameTime.current = currentTime;
 
-    // Player movement
     let newX = player.current.position.x;
     if (keysPressed.current['a'] || keysPressed.current['ArrowLeft']) {
       newX -= PLAYER_SPEED * deltaTime;
@@ -241,7 +331,6 @@ const App: React.FC = () => {
     }
     player.current.position.x = Math.max(0, Math.min(GAME_WIDTH - PLAYER_WIDTH, newX));
     
-    // Player firing
     if (keysPressed.current[' '] && currentTime - lastPlayerFireTime.current > LASER_COOLDOWN) {
       lastPlayerFireTime.current = currentTime;
       playerLasers.current.push({
@@ -257,12 +346,10 @@ const App: React.FC = () => {
       audioManagerRef.current?.play(SoundEffect.PlayerShoot);
     }
 
-    // Move lasers
     playerLasers.current = playerLasers.current.map(l => ({ ...l, position: { ...l.position, y: l.position.y + PLAYER_LASER_SPEED * deltaTime } })).filter(l => l.position.y < GAME_HEIGHT);
     invaderLasers.current = invaderLasers.current.map(l => ({ ...l, position: { ...l.position, y: l.position.y - INVADER_LASER_SPEED * deltaTime } })).filter(l => l.position.y > 0);
 
-    // Update particles
-    const gravity = -98.0; // Gravity pulls down in a Y-up system
+    const gravity = -98.0;
     particles.current = particles.current.map(p => ({
         ...p,
         position: {
@@ -277,7 +364,6 @@ const App: React.FC = () => {
         life: p.life - deltaTime,
     })).filter(p => p.life > 0);
 
-    // Move invaders
     let invadersHitWall = false;
     invaders.current.forEach(invader => {
         if (invaderDirection.current === 'right') {
@@ -295,7 +381,6 @@ const App: React.FC = () => {
       invaders.current.forEach(invader => invader.position.y -= INVADER_DROP_DOWN_AMOUNT);
     }
 
-    // Invader firing
     invaders.current.forEach(invader => {
       if (Math.random() < INVADER_FIRE_CHANCE) {
         invaderLasers.current.push({
@@ -312,7 +397,6 @@ const App: React.FC = () => {
       }
     });
 
-    // Collision detection
     const invadersToRemove = new Set<number>();
     const lasersToRemove = new Set<number>();
     const invaderColors = [
@@ -374,7 +458,6 @@ const App: React.FC = () => {
       setGameState(GameState.GameOver);
     }
 
-    // Render frame
     if(rendererRef.current) {
         rendererRef.current.render({
             player: player.current,
@@ -386,7 +469,7 @@ const App: React.FC = () => {
     }
 
     animationFrameId.current = requestAnimationFrame(gameLoop);
-  }, [createExplosion, cameraYOffset]);
+  }, [createExplosion, cameraYOffset, resetGame]);
 
   
 
@@ -424,21 +507,27 @@ const App: React.FC = () => {
 
   return (
     <div
-      className="relative bg-[#0d0d0d] overflow-hidden border-2 border-green-500/50 shadow-[0_0_25px_rgba(74,222,128,0.4)]"
-      style={{ width: GAME_WIDTH, height: GAME_HEIGHT }}
+      ref={gameContainerRef}
+      className="game-container relative bg-[#0d0d0d] overflow-hidden border-2 border-green-500/50 shadow-[0_0_25px_rgba(74,222,128,0.4)]"
     >
-      <canvas ref={canvasRef} width={GAME_WIDTH} height={GAME_HEIGHT} className="absolute top-0 left-0" />
-      <div className="absolute top-0 left-0 w-full h-full pointer-events-none">
-        {gameState !== GameState.Playing && (
+      <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full" />
+      
+      {/* UI Overlay */}
+      <div className="absolute top-0 left-0 w-full h-full">
+        {gameState !== GameState.Playing ? (
           <div className="pointer-events-auto">
-            {gameState === GameState.StartMenu && <StartScreen onStart={startGame} isRendererReady={isRendererReady} isAudioPreloaded={isAudioPreloaded} />}
+            <StartScreen onStart={startGame} isRendererReady={isRendererReady} isAudioPreloaded={isAudioPreloaded} isAudioInitializing={isAudioInitializing} />
             {gameState === GameState.GameOver && <GameOverScreen score={score} onRestart={startGame} />}
           </div>
+        ) : (
+          <>
+            <GameUI score={score} lives={lives} cameraYOffset={cameraYOffset} />
+            {isTouchDevice && <OnScreenControls onButtonPress={handleButtonPress} onButtonRelease={handleButtonRelease} />}
+          </>
         )}
-        {gameState === GameState.Playing && <GameUI score={score} lives={lives} cameraYOffset={cameraYOffset} />}
       </div>
     </div>
   );
 };
 
-export default App;App;
+export default App;

@@ -17,7 +17,7 @@ export const LASER_COOLDOWN = 300; // ms
 
 export const INVADER_WIDTH = 50;
 export const INVADER_HEIGHT = 40;
-export const INVADER_DEPTH = 40;
+export const INVADER_DEPTH = 80;
 export const INVADER_ROWS = 5;
 export const INVADER_COLS = 11;
 export const INVADER_SPACING = { x: 60, y: 45 };

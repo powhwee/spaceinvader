@@ -10,7 +10,6 @@ export enum SoundEffect {
 
 /**
  * A map defining the file paths for each sound effect.
- * You will need to create these sound files and place them in your `public/sounds/` directory.
  */
 export const soundFiles: Record<SoundEffect, string> = {
     [SoundEffect.PlayerShoot]: '/sounds/player-shoot.wav',
@@ -22,65 +21,81 @@ export const soundFiles: Record<SoundEffect, string> = {
 export class AudioManager {
     private audioContext: AudioContext | null = null;
     private soundBuffers: Map<SoundEffect, AudioBuffer> = new Map();
+    private logger: (message: string) => void;
 
-    /**
-     * Initializes the AudioContext. Must be called after a user interaction
-     * (e.g., clicking a "Start Game" button) to comply with browser autoplay policies.
-     */
-    public initialize(): void {
-        if (this.audioContext) return;
-        try {
-            this.audioContext = new window.AudioContext();
-        } catch (e) {
-            console.error("Web Audio API is not supported in this browser.", e);
+    constructor(logger: (message: string) => void = console.log) {
+        this.logger = logger;
+    }
+
+    public async initialize(): Promise<boolean> {
+        this.logger("AudioManager: initialize called.");
+        if (this.audioContext && this.audioContext.state === 'running') {
+            this.logger("AudioManager: Context already exists and is running.");
+            return true;
         }
+
+        if (!this.audioContext) {
+            try {
+                this.logger("AudioManager: No AudioContext, creating a new one.");
+                this.audioContext = new window.AudioContext();
+                this.logger(`AudioManager: Context created. Initial state: ${this.audioContext.state}`);
+            } catch (e) {
+                this.logger(`ERROR: Web Audio API is not supported in this browser. ${e}`);
+                return false;
+            }
+        }
+
+        if (this.audioContext.state === 'suspended') {
+            this.logger("AudioManager: Context is suspended, attempting to resume.");
+            try {
+                await this.audioContext.resume();
+                this.logger(`AudioManager: Resume complete. New state: ${this.audioContext.state}`);
+            } catch (e) {
+                this.logger(`ERROR: Failed to resume AudioContext. ${e}`);
+                return false;
+            }
+        }
+        
+        const isRunning = this.audioContext.state === 'running';
+        this.logger(`AudioManager: Initialization finished. Is running: ${isRunning}`);
+        return isRunning;
     }
 
     public async decodeSounds(soundData: Map<SoundEffect, ArrayBuffer>): Promise<void> {
         if (!this.audioContext) {
-            console.warn("AudioContext not initialized. Cannot decode sounds.");
+            this.logger("WARN: AudioContext not initialized. Cannot decode sounds.");
             return;
         }
+        this.logger("AudioManager: Decoding sounds...");
 
         const decodePromises = Array.from(soundData.entries()).map(async ([key, arrayBuffer]) => {
             try {
-                const audioBuffer = await this.audioContext!.decodeAudioData(arrayBuffer);
+                const audioBuffer = await this.audioContext!.decodeAudioData(arrayBuffer.slice(0));
                 this.soundBuffers.set(key, audioBuffer);
             } catch (e) {
-                console.error(`Failed to decode sound: ${key}`, e);
+                this.logger(`ERROR: Failed to decode sound: ${key}. ${e}`);
             }
         });
 
         await Promise.all(decodePromises);
+        this.logger("AudioManager: Sound decoding complete.");
     }
 
-    /**
-     * Loads all defined sound effects into memory by fetching and then decoding them.
-     */
-    public async loadSounds(): Promise<void> {
-        const soundData = new Map<SoundEffect, ArrayBuffer>();
-        const fetchPromises = Object.entries(soundFiles).map(async ([key, path]) => {
-            try {
-                const response = await fetch(path);
-                const arrayBuffer = await response.arrayBuffer();
-                soundData.set(key as SoundEffect, arrayBuffer);
-            } catch (e) {
-                console.error(`Failed to fetch sound: ${key}`, e);
-            }
-        });
-        await Promise.all(fetchPromises);
-        await this.decodeSounds(soundData);
-    }
-
-    /**
-     * Plays a pre-loaded sound effect.
-     * @param key The SoundEffect to play.
-     */
     public play(key: SoundEffect): void {
-        if (!this.audioContext || !this.soundBuffers.has(key)) return;
+        if (!this.audioContext || this.audioContext.state !== 'running') {
+            const state = this.audioContext ? this.audioContext.state : 'null';
+            this.logger(`WARN: Cannot play sound. AudioContext state is: ${state}`);
+            return;
+        }
+
+        const buffer = this.soundBuffers.get(key);
+        if (!buffer) {
+            this.logger(`WARN: Sound buffer for ${key} not found.`);
+            return;
+        }
 
         const source = this.audioContext.createBufferSource();
-        source.buffer = this.soundBuffers.get(key)!;
+        source.buffer = buffer;
         source.connect(this.audioContext.destination);
         source.start(0);
     }
