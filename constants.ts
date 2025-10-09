@@ -12,7 +12,7 @@ export const LASER_WIDTH = 4;
 export const LASER_HEIGHT = 20;
 export const LASER_DEPTH = 4;
 export const PLAYER_LASER_SPEED = 450;
-export const INVADER_LASER_SPEED = 250;
+export const INVADER_LASER_SPEED = 200;
 export const LASER_COOLDOWN = 300; // ms
 
 export const INVADER_WIDTH = 50;
