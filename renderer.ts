@@ -1,5 +1,11 @@
 /// <reference types="@webgpu/types" />
 
+import playerShipWGSL from './models/playerShip.wgsl?raw';
+import invaderWGSL from './models/invader.wgsl?raw';
+import laserWGSL from './models/laser.wgsl?raw';
+import cubeWGSL from './models/cube.wgsl?raw';
+import flameWGSL from './models/flame.wgsl?raw';
+
 import type { Player, Invader, Laser, Particle, GameObject } from './types';
 import { ModelType } from './types';
 import { GAME_WIDTH, GAME_HEIGHT } from './constants';
@@ -117,11 +123,11 @@ export class WebGPURenderer {
         await this.resourceManager.loadModel(ModelType.Invader, invaderVertices, invaderIndices);
         await this.resourceManager.loadModel(ModelType.Laser, laserVertices, laserIndices);
 
-        await this.resourceManager.loadShader('playerShip', './models/playerShip.wgsl');
-        await this.resourceManager.loadShader('invader', './models/invader.wgsl');
-        await this.resourceManager.loadShader('laser', './models/laser.wgsl');
-        await this.resourceManager.loadShader('cube', './models/cube.wgsl');
-        await this.resourceManager.loadShader('flame', './models/flame.wgsl');
+        this.resourceManager.shaders.set('playerShip', playerShipWGSL);
+        this.resourceManager.shaders.set('invader', invaderWGSL);
+        this.resourceManager.shaders.set('laser', laserWGSL);
+        this.resourceManager.shaders.set('cube', cubeWGSL);
+        this.resourceManager.shaders.set('flame', flameWGSL);
 
         // --- Create Pipelines & Bind Groups ---
         this._createPlayerShipPipeline();
