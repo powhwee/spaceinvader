@@ -1,4 +1,3 @@
-// FIX: The triple-slash directive below provides TypeScript with WebGPU type definitions, resolving errors about missing types like GPUDevice, GPUBuffer, etc.
 /// <reference types="@webgpu/types" />
 
 import type { Player, Invader, Laser, Particle, GameObject } from './types';
@@ -6,24 +5,15 @@ import { ModelType } from './types';
 import { GAME_WIDTH, GAME_HEIGHT } from './constants';
 import { mat4, vec3 } from 'gl-matrix';
 import {
-    cubeVertices, cubeIndices, cubeVsCode, cubeFsCode,
-    playerShipVsCode, playerShipFsCode,
-    invaderVertices, invaderIndices, invaderShader,
-    laserVertices, laserIndices, laserVsCode, laserFsCode
+    cubeVertices, cubeIndices,
+    invaderVertices, invaderIndices,
+    laserVertices, laserIndices
 } from './models';
-import { createFlameSystem, flameShader } from './models/flames';
-import { load } from '@loaders.gl/core';
-import { GLTFLoader } from '@loaders.gl/gltf';
+import { createFlameSystem } from './models/flames';
+import { ResourceManager, Model } from './ResourceManager';
 
 const MAX_INSTANCES = 5096;
 const INSTANCE_BYTE_SIZE = 64;
-
-type Model = {
-    vertices: Float32Array;
-    indices: Uint16Array | Uint32Array;
-    vertexBuffer: GPUBuffer;
-    indexBuffer: GPUBuffer;
-};
 
 const invaderColors = [
   [236/255, 72/255, 153/255, 1.0],  // Pink
@@ -51,7 +41,7 @@ export class WebGPURenderer {
     private presentationFormat!: GPUTextureFormat;
     private depthTexture!: GPUTexture;
 
-    private models!: Map<ModelType, Model>;
+    private resourceManager!: ResourceManager;
     private uniformBuffer!: GPUBuffer;
     private flameUniformBuffer!: GPUBuffer;
     private instanceBuffer!: GPUBuffer;
@@ -105,7 +95,7 @@ export class WebGPURenderer {
             alphaMode: 'premultiplied',
         });
 
-        this.models = new Map<ModelType, Model>();
+        this.resourceManager = new ResourceManager(this.device);
 
         // --- Buffers ---
         this.uniformBuffer = this.device.createBuffer({
@@ -121,115 +111,34 @@ export class WebGPURenderer {
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         });
 
-        // --- Load Player Ship (Textured Model) ---
-        try {
-            const gltf = await load('models/playerShip/scene.gltf', GLTFLoader);
-            const primitive = gltf.json.meshes[0].primitives[0];
+        // --- Load Assets ---
+        await this.resourceManager.loadGltfModel(ModelType.PlayerShip, 'models/playerShip/scene.gltf');
+        await this.resourceManager.loadModel(ModelType.Cube, cubeVertices, cubeIndices);
+        await this.resourceManager.loadModel(ModelType.Invader, invaderVertices, invaderIndices);
+        await this.resourceManager.loadModel(ModelType.Laser, laserVertices, laserIndices);
 
-            const getAccessorData = (gltf: any, accessorIndex: any) => {
-                const accessor = gltf.json.accessors[accessorIndex];
-                const bufferView = gltf.json.bufferViews[accessor.bufferView];
-                const buffer = gltf.buffers[bufferView.buffer];
-                let TypedArray;
-                switch (accessor.componentType) {
-                    case 5126: TypedArray = Float32Array; break; // FLOAT
-                    case 5123: TypedArray = Uint16Array; break; // UNSIGNED_SHORT
-                    case 5125: TypedArray = Uint32Array; break; // UNSIGNED_INT
-                    default: throw new Error(`Unsupported component type: ${accessor.componentType}`);
-                }
-                const getNumComponents = (type: string) => {
-                    switch (type) {
-                        case 'SCALAR': return 1; case 'VEC2': return 2; case 'VEC3': return 3; case 'VEC4': return 4;
-                        default: return 1;
-                    }
-                };
-                const numComponents = getNumComponents(accessor.type);
-                const numElements = accessor.count * numComponents;
-                const byteOffset = (bufferView.byteOffset || 0) + (accessor.byteOffset || 0);
-                return new TypedArray(buffer.arrayBuffer, buffer.byteOffset + byteOffset, numElements);
-            };
+        await this.resourceManager.loadShader('playerShip', './models/playerShip.wgsl');
+        await this.resourceManager.loadShader('invader', './models/invader.wgsl');
+        await this.resourceManager.loadShader('laser', './models/laser.wgsl');
+        await this.resourceManager.loadShader('cube', './models/cube.wgsl');
+        await this.resourceManager.loadShader('flame', './models/flame.wgsl');
 
-            const positions = getAccessorData(gltf, primitive.attributes.POSITION);
-            const normals = getAccessorData(gltf, primitive.attributes.NORMAL);
-            const uvs = getAccessorData(gltf, primitive.attributes.TEXCOORD_0);
-            const indices = getAccessorData(gltf, primitive.indices);
+        // --- Create Pipelines & Bind Groups ---
+        this._createPlayerShipPipeline();
+        this._createNonTexturedPipelines();
+        this._createFlamePipeline();
 
-            let minX = Infinity, minY = Infinity, minZ = Infinity;
-            let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-            for (let i = 0; i < positions.length; i += 3) {
-                const x = positions[i], y = positions[i + 1], z = positions[i + 2];
-                if (x < minX) minX = x; if (x > maxX) maxX = x;
-                if (y < minY) minY = y; if (y > maxY) maxY = y;
-                if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
-            }
-            const modelWidth = maxX - minX, modelHeight = maxY - minY, modelDepth = maxZ - minZ;
-            const centerX = minX + modelWidth / 2, centerY = minY + modelHeight / 2, centerZ = minZ + modelDepth / 2;
-            const maxDim = Math.max(modelWidth, modelHeight, modelDepth);
-            const scaleFactor = 1.0 / maxDim;
-            const vertexCount = positions.length / 3;
-            const combinedVertices = new Float32Array(vertexCount * 8);
-            for (let i = 0; i < vertexCount; i++) {
-                const p_offset = i * 3, v_offset = i * 8;
-                combinedVertices[v_offset + 0] = (positions[p_offset + 0] - centerX) * scaleFactor;
-                combinedVertices[v_offset + 1] = (positions[p_offset + 1] - centerY) * scaleFactor;
-                combinedVertices[v_offset + 2] = (positions[p_offset + 2] - centerZ) * scaleFactor;
-                const n_offset = i * 3;
-                combinedVertices[v_offset + 3] = normals[n_offset + 0];
-                combinedVertices[v_offset + 4] = normals[n_offset + 1];
-                combinedVertices[v_offset + 5] = normals[n_offset + 2];
-                const uv_offset = i * 2;
-                combinedVertices[v_offset + 6] = uvs[uv_offset + 0];
-                combinedVertices[v_offset + 7] = uvs[uv_offset + 1];
-            }
+        return true;
+    }
 
-            const vertexBuffer = this.device.createBuffer({ size: combinedVertices.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST, mappedAtCreation: true });
-            new Float32Array(vertexBuffer.getMappedRange()).set(combinedVertices);
-            vertexBuffer.unmap();
-            const indexBuffer = this.device.createBuffer({ size: indices.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST, mappedAtCreation: true });
-            new Uint16Array(indexBuffer.getMappedRange()).set(indices);
-            indexBuffer.unmap();
-            this.models.set(ModelType.PlayerShip, { vertices: combinedVertices, indices, vertexBuffer, indexBuffer });
+    private _createPlayerShipPipeline() {
+        const texturedBindGroupLayout = this.device.createBindGroupLayout({ entries: [ { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} }, { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: {} }, { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: {} } ] });
+        this.playerShipBindGroup = this.device.createBindGroup({ layout: texturedBindGroupLayout, entries: [ { binding: 0, resource: { buffer: this.uniformBuffer } }, { binding: 1, resource: { buffer: this.instanceBuffer } }, { binding: 2, resource: this.resourceManager.sampler }, { binding: 3, resource: this.resourceManager.textures.get('baseColor')!.createView() }, { binding: 4, resource: this.resourceManager.textures.get('metallicRoughness')!.createView() } ] });
+        const pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [texturedBindGroupLayout] });
+        this.playerShipPipeline = this.device.createRenderPipeline({ layout: pipelineLayout, vertex: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('playerShip')! }), entryPoint: 'vs_main', buffers: [{ arrayStride: 8 * 4, attributes: [ { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }, { shaderLocation: 2, offset: 6 * 4, format: 'float32x2' } ] }] }, fragment: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('playerShip')! }), entryPoint: 'fs_main', targets: [{ format: this.presentationFormat, blend: { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' }, alpha: {}} }] }, primitive: { topology: 'triangle-list' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' } });
+    }
 
-            const material = gltf.json.materials[primitive.material];
-            const pbrInfo = material.pbrMetallicRoughness;
-            const loadTexture = (textureInfo: any) => {
-                const image = gltf.images[gltf.json.textures[textureInfo.index].source];
-                if (!image) { throw new Error("Could not find texture image."); }
-                const gpuTexture = this.device.createTexture({ size: [image.width, image.height, 1], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
-                this.device.queue.copyExternalImageToTexture({ source: image }, { texture: gpuTexture }, [image.width, image.height]);
-                return gpuTexture;
-            };
-            const baseColorTexture = loadTexture(pbrInfo.baseColorTexture);
-            const metallicRoughnessTexture = loadTexture(pbrInfo.metallicRoughnessTexture);
-            const sampler = this.device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-
-            const texturedBindGroupLayout = this.device.createBindGroupLayout({ entries: [ { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} }, { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: {} }, { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: {} } ] });
-            this.playerShipBindGroup = this.device.createBindGroup({ layout: texturedBindGroupLayout, entries: [ { binding: 0, resource: { buffer: this.uniformBuffer } }, { binding: 1, resource: { buffer: this.instanceBuffer } }, { binding: 2, resource: sampler }, { binding: 3, resource: baseColorTexture.createView() }, { binding: 4, resource: metallicRoughnessTexture.createView() } ] });
-            const pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [texturedBindGroupLayout] });
-            this.playerShipPipeline = this.device.createRenderPipeline({ layout: pipelineLayout, vertex: { module: this.device.createShaderModule({ code: playerShipVsCode }), entryPoint: 'main', buffers: [{ arrayStride: 8 * 4, attributes: [ { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }, { shaderLocation: 2, offset: 6 * 4, format: 'float32x2' } ] }] }, fragment: { module: this.device.createShaderModule({ code: playerShipFsCode }), entryPoint: 'main', targets: [{ format: this.presentationFormat, blend: { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' }, alpha: {}} }] }, primitive: { topology: 'triangle-list' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' } });
-        } catch (error) {
-            console.error("Failed to load and set up player ship model", error);
-            return false;
-        }
-
-        // --- Load Other Models ---
-        const modelData = [
-            { type: ModelType.Cube, vertices: cubeVertices, indices: cubeIndices },
-            { type: ModelType.Invader, vertices: invaderVertices, indices: invaderIndices },
-            { type: ModelType.Laser, vertices: laserVertices, indices: laserIndices },
-        ];
-        for (const data of modelData) {
-            const vertexBuffer = this.device.createBuffer({ size: data.vertices.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST, mappedAtCreation: true });
-            new Float32Array(vertexBuffer.getMappedRange()).set(data.vertices);
-            vertexBuffer.unmap();
-            const indexBuffer = this.device.createBuffer({ size: data.indices.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST, mappedAtCreation: true });
-            const indexArray = data.indices instanceof Uint16Array ? new Uint16Array(indexBuffer.getMappedRange()) : new Uint32Array(indexBuffer.getMappedRange());
-            indexArray.set(data.indices);
-            indexBuffer.unmap();
-            this.models.set(data.type, { vertices: data.vertices, indices: data.indices, vertexBuffer, indexBuffer });
-        }
-
-        // --- Create Pipelines & Bind Group for Non-Player Models ---
+    private _createNonTexturedPipelines() {
         const nonTexturedBindGroupLayout = this.device.createBindGroupLayout({ entries: [ { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } } ] });
         this.nonTexturedBindGroup = this.device.createBindGroup({ layout: nonTexturedBindGroupLayout, entries: [{ binding: 0, resource: { buffer: this.uniformBuffer } }, { binding: 1, resource: { buffer: this.instanceBuffer } }] });
         const pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [nonTexturedBindGroupLayout] });
@@ -237,42 +146,40 @@ export class WebGPURenderer {
         const defaultBlend: GPUBlendState = { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' } };
         const additiveBlend: GPUBlendState = { color: { srcFactor: 'src-alpha', dstFactor: 'one' }, alpha: { srcFactor: 'one', dstFactor: 'one' } };
 
-        // Invader Pipeline
         this.invaderPipeline = this.device.createRenderPipeline({
             layout: pipelineLayout,
-            vertex: { module: this.device.createShaderModule({ code: invaderShader }), entryPoint: 'vs_main', buffers: [{ arrayStride: 8 * 4, attributes: [ { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }, { shaderLocation: 2, offset: 6 * 4, format: 'float32x2' } ] }] },
-            fragment: { module: this.device.createShaderModule({ code: invaderShader }), entryPoint: 'fs_main', targets: [{ format: this.presentationFormat, blend: defaultBlend }] },
+            vertex: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('invader')! }), entryPoint: 'vs_main', buffers: [{ arrayStride: 8 * 4, attributes: [ { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }, { shaderLocation: 2, offset: 6 * 4, format: 'float32x2' } ] }] },
+            fragment: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('invader')! }), entryPoint: 'fs_main', targets: [{ format: this.presentationFormat, blend: defaultBlend }] },
             primitive: { topology: 'triangle-list' },
             depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' },
         });
 
-        // Laser Pipeline
         this.laserPipeline = this.device.createRenderPipeline({
             layout: pipelineLayout,
-            vertex: { module: this.device.createShaderModule({ code: laserVsCode }), entryPoint: 'main', buffers: [{ arrayStride: 6 * 4, attributes: [ { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' } ] }] },
-            fragment: { module: this.device.createShaderModule({ code: laserFsCode }), entryPoint: 'main', targets: [{ format: this.presentationFormat, blend: defaultBlend }] },
+            vertex: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('laser')! }), entryPoint: 'vs_main', buffers: [{ arrayStride: 6 * 4, attributes: [ { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' } ] }] },
+            fragment: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('laser')! }), entryPoint: 'fs_main', targets: [{ format: this.presentationFormat, blend: defaultBlend }] },
             primitive: { topology: 'triangle-list' },
             depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' },
         });
 
-        // Particle Pipeline
         this.particlePipeline = this.device.createRenderPipeline({
             layout: pipelineLayout,
-            vertex: { module: this.device.createShaderModule({ code: cubeVsCode }), entryPoint: 'main', buffers: [{ arrayStride: 6 * 4, attributes: [ { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' } ] }] },
-            fragment: { module: this.device.createShaderModule({ code: cubeFsCode }), entryPoint: 'main', targets: [{ format: this.presentationFormat, blend: additiveBlend }] },
+            vertex: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('cube')! }), entryPoint: 'vs_main', buffers: [{ arrayStride: 6 * 4, attributes: [ { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' } ] }] },
+            fragment: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('cube')! }), entryPoint: 'fs_main', targets: [{ format: this.presentationFormat, blend: additiveBlend }] },
             primitive: { topology: 'triangle-list' },
             depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' },
         });
+    }
 
-        // --- Flame System ---
+    private _createFlamePipeline() {
         this.flameSystem = createFlameSystem(this.device);
         const flameBindGroupLayout = this.device.createBindGroupLayout({ entries: [ { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } } ] });
         this.flameBindGroup = this.device.createBindGroup({ layout: flameBindGroupLayout, entries: [{ binding: 1, resource: { buffer: this.flameUniformBuffer } }] });
         const flamePipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [flameBindGroupLayout] });
-                this.flamePipeline = this.device.createRenderPipeline({
+        this.flamePipeline = this.device.createRenderPipeline({
             layout: flamePipelineLayout,
             vertex: {
-                module: this.device.createShaderModule({ code: flameShader }),
+                module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('flame')! }),
                 entryPoint: 'vs_main',
                 buffers: [{
                     arrayStride: 8 * 4, // 3 pos, 1 size, 4 color
@@ -285,15 +192,13 @@ export class WebGPURenderer {
                 }],
             },
             fragment: {
-                module: this.device.createShaderModule({ code: flameShader }),
+                module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('flame')! }),
                 entryPoint: 'fs_main',
-                targets: [{ format: this.presentationFormat, blend: additiveBlend }],
+                targets: [{ format: this.presentationFormat, blend: { color: { srcFactor: 'src-alpha', dstFactor: 'one' }, alpha: { srcFactor: 'one', dstFactor: 'one' } } }],
             },
             primitive: { topology: 'triangle-list' },
             depthStencil: { depthWriteEnabled: false, depthCompare: 'less', format: 'depth24plus' },
         });
-
-        return true;
     }
 
     private updateCamera(cameraYOffset: number) {
@@ -324,27 +229,19 @@ export class WebGPURenderer {
         const aspect = width / height;
         const nativeAspect = 800 / 600;
 
-        // Define the base vertical FOV, which we want to maintain in landscape.
         const baseVerticalFov = 60 * (Math.PI / 180);
         let verticalFov = baseVerticalFov;
 
-        // If the screen is narrower than the game's native aspect ratio (e.g., portrait mode)
         if (aspect < nativeAspect) {
-            // We are constrained by width. We need to adjust the vertical FOV
-            // to ensure the horizontal FOV remains constant and shows the whole game world.
-            // First, calculate the horizontal FOV that corresponds to our base vertical FOV at the native aspect ratio.
             const baseHorizontalFov = 2 * Math.atan(Math.tan(baseVerticalFov / 2) * nativeAspect);
-            
-            // Now, calculate the new vertical FOV that will produce our desired baseHorizontalFov with the new, narrower aspect ratio.
             verticalFov = 2 * Math.atan(Math.tan(baseHorizontalFov / 2) / aspect);
         }
-        // Else (for landscape modes), we just use the baseVerticalFov, and the view will be letterboxed.
 
         mat4.perspective(this.projectionMatrix, verticalFov, aspect, 1, 2000);
     }
 
     render(gameObjects: GameObjects, cameraYOffset: number, deltaTime: number): void {
-        if (!this.device || !this.models) return;
+        if (!this.device || !this.resourceManager) return;
 
         this.updateCamera(cameraYOffset);
         this.device.queue.writeBuffer(this.uniformBuffer, 0, this.viewProjectionMatrix as Float32Array);
@@ -413,7 +310,7 @@ export class WebGPURenderer {
         let drawnInstances = 0;
         for (const [modelType, objects] of objectsByModel.entries()) {
             if (objects.length === 0) continue;
-            const model = this.models.get(modelType)!;
+            const model = this.resourceManager.models.get(modelType)!;
 
             let pipeline: GPURenderPipeline;
             let bindGroup = this.nonTexturedBindGroup;
@@ -423,6 +320,7 @@ export class WebGPURenderer {
                 case ModelType.PlayerShip:
                     pipeline = this.playerShipPipeline;
                     bindGroup = this.playerShipBindGroup;
+                    indexFormat = 'uint32';
                     break;
                 case ModelType.Invader:
                     pipeline = this.invaderPipeline;

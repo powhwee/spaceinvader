@@ -1,41 +1,22 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameState, ModelType } from './types';
-import type { Player, Invader, Laser, Particle, Position } from './types';
-import {
-  GAME_WIDTH, GAME_HEIGHT, 
-  PLAYER_WIDTH, PLAYER_HEIGHT, PLAYER_DEPTH, PLAYER_SPEED, PLAYER_Y_OFFSET,
-  LASER_WIDTH, LASER_HEIGHT, LASER_DEPTH, PLAYER_LASER_SPEED, INVADER_LASER_SPEED, LASER_COOLDOWN,
-  INVADER_WIDTH, INVADER_HEIGHT, INVADER_DEPTH, INVADER_ROWS, INVADER_COLS, INVADER_SPACING, INVADER_INITIAL_Y,
-  INITIAL_INVADER_SPEED, INVADER_SPEED_INCREMENT, INVADER_DROP_DOWN_AMOUNT, INVADER_FIRE_CHANCE, INITIAL_LIVES
-} from './constants';
+import { GameState } from './types';
+import { INITIAL_LIVES } from './constants';
 import { WebGPURenderer } from './renderer';
 import { AudioManager, SoundEffect, soundFiles } from './audio';
-
-const createInvaders = (): Invader[] => {
-  const invaders: Invader[] = [];
-  for (let row = 0; row < INVADER_ROWS; row++) {
-    for (let col = 0; col < INVADER_COLS; col++) {
-      invaders.push({
-        id: Date.now() + row * INVADER_COLS + col,
-        position: {
-          x: col * INVADER_SPACING.x + (GAME_WIDTH - INVADER_COLS * INVADER_SPACING.x) / 2 + 5,
-          y: (GAME_HEIGHT - INVADER_INITIAL_Y - INVADER_HEIGHT) - (row * INVADER_SPACING.y),
-          z: 0,
-        },
-        size: { width: INVADER_WIDTH, height: INVADER_HEIGHT, depth: INVADER_DEPTH },
-        type: row,
-        modelType: ModelType.Invader,
-      });
-    }
-  }
-  return invaders;
-};
+import { GameEngine } from './GameEngine';
+import { InputManager } from './InputManager';
 
 const GameUI: React.FC<{ score: number; lives: number, cameraYOffset: number }> = ({ score, lives, cameraYOffset }) => (
-    <div className="p-4 flex justify-between text-2xl text-cyan-400 font-['VT323'] pointer-events-none">
-        <span>SCORE: {score}</span>
-        <p>CAMERA_Y_OFFSET: {cameraYOffset.toFixed(2)}</p>
-        <span>LIVES: {'<'.repeat(lives).padEnd(INITIAL_LIVES, ' ')}</span>
+    <div className="relative p-4 flex justify-between text-2xl text-cyan-400 font-['VT323'] pointer-events-none">
+        <div>
+            <p>SCORE: {score}</p>
+        </div>
+        <div className="absolute left-1/2 -translate-x-1/2">
+            <p>CAMERA_Y_OFFSET: {cameraYOffset.toFixed(2)}</p>
+        </div>
+        <div>
+            <p>LIVES: {'<'.repeat(lives).padEnd(INITIAL_LIVES, ' ')}</p>
+        </div>
     </div>
 );
 
@@ -140,394 +121,183 @@ const OnScreenControls: React.FC<{ onButtonPress: (key: string) => void; onButto
 
 
 const App: React.FC = () => {
-  const [gameState, setGameState] = useState<GameState>(GameState.StartMenu);
-  const [score, setScore] = useState(0);
-  const [lives, setLives] = useState(INITIAL_LIVES);
-  const [isRendererReady, setIsRendererReady] = useState(false);
-  const [isAudioPreloaded, setIsAudioPreloaded] = useState(false);
-  const [isAudioInitialized, setIsAudioInitialized] = useState(false);
-  const [isAudioInitializing, setIsAudioInitializing] = useState(false);
-  const [isTouchDevice, setIsTouchDevice] = useState(false);
-  const [cameraYOffset, setCameraYOffset] = useState(0);
-
-  const player = useRef<Player>({
-    id: 1,
-    position: { x: (GAME_WIDTH - PLAYER_WIDTH) / 2, y: PLAYER_Y_OFFSET, z: 0 },
-    size: { width: PLAYER_WIDTH, height: PLAYER_HEIGHT, depth: PLAYER_DEPTH },
-    modelType: ModelType.PlayerShip,
-  });
-  const invaders = useRef<Invader[]>(createInvaders());
-  const playerLasers = useRef<Laser[]>([]);
-  const invaderLasers = useRef<Laser[]>([]);
-  const particles = useRef<Particle[]>([]);
-  const invaderDirection = useRef<'right' | 'left'>('right');
-  const invaderSpeed = useRef<number>(INITIAL_INVADER_SPEED);
-
-  const keysPressed = useRef<Record<string, boolean>>({});
-  const lastPlayerFireTime = useRef<number>(0);
-  const lastFrameTime = useRef<number>(performance.now());
-  const animationFrameId = useRef<number>(0);
-  
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const gameContainerRef = useRef<HTMLDivElement>(null);
-  const rendererRef = useRef<WebGPURenderer | null>(null);
-  const audioManagerRef = useRef<AudioManager | null>(null);
-  const soundDataRef = useRef<Map<SoundEffect, ArrayBuffer>>(new Map());
-
-  const createExplosion = useCallback((position: Position, count: number, color: number[]) => {
-    for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const pitch = Math.random() * Math.PI - Math.PI / 2;
-      const speed = Math.random() * 150 + 50; // pixels per second
-      const life = Math.random() * 0.5 + 0.5; // 0.5 to 1.0 seconds lifetime
-
-      particles.current.push({
-        id: performance.now() + Math.random(),
-        position: { x: position.x, y: position.y, z: position.z },
-        size: { width: 15, height: 15, depth: 15 },
-        velocity: {
-          x: Math.cos(angle) * Math.cos(pitch) * speed,
-          y: Math.sin(pitch) * speed,
-          z: Math.sin(angle) * Math.cos(pitch) * speed,
-        },
-        life: life,
-        initialLife: life,
-        color: color,
-        modelType: ModelType.Cube,
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0);
-
-    if (!canvasRef.current) return;
-
-    if (!rendererRef.current) {
-        const renderer = new WebGPURenderer(canvasRef.current);
-        rendererRef.current = renderer;
-
-        renderer.init().then((success) => {
-          if (success) {
-            setIsRendererReady(true);
-            if (gameContainerRef.current) {
-                const { width, height } = gameContainerRef.current.getBoundingClientRect();
-                renderer.resize(width, height);
-            }
-          } else {
-            console.error("Failed to initialize WebGPU renderer.");
-          }
-        });
-    }
-
-    const resizeObserver = new ResizeObserver(entries => {
-      if (!entries || entries.length === 0 || !rendererRef.current) return;
-      const { width, height } = entries[0].contentRect;
-      rendererRef.current.resize(width, height);
+    const [uiState, setUiState] = useState({
+        gameState: GameState.StartMenu,
+        score: 0,
+        lives: INITIAL_LIVES,
+        cameraYOffset: 0,
     });
+    const [isRendererReady, setIsRendererReady] = useState(false);
+    const [isAudioPreloaded, setIsAudioPreloaded] = useState(false);
+    const [isAudioInitialized, setIsAudioInitialized] = useState(false);
+    const [isAudioInitializing, setIsAudioInitializing] = useState(false);
+    const [isTouchDevice, setIsTouchDevice] = useState(false);
 
-    if (gameContainerRef.current) {
-      resizeObserver.observe(gameContainerRef.current);
-    }
+    const gameEngine = useRef<GameEngine | null>(null);
+    const inputManager = useRef<InputManager | null>(null);
+    const lastFrameTime = useRef<number>(performance.now());
+    const animationFrameId = useRef<number>(0);
 
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, []);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const gameContainerRef = useRef<HTMLDivElement>(null);
+    const rendererRef = useRef<WebGPURenderer | null>(null);
+    const audioManagerRef = useRef<AudioManager | null>(null);
+    const soundDataRef = useRef<Map<SoundEffect, ArrayBuffer>>(new Map());
 
-  useEffect(() => {
-    const prefetchAllSounds = async () => {
-        const fetchPromises = Object.entries(soundFiles).map(async ([key, path]) => {
-            try {
-                const response = await fetch(path);
-                const arrayBuffer = await response.arrayBuffer();
-                soundDataRef.current.set(key as SoundEffect, arrayBuffer);
-            } catch (e) {
-                console.error(`Failed to fetch sound: ${key}`, e);
-            }
-        });
-        await Promise.all(fetchPromises);
-        setIsAudioPreloaded(true);
-    };
-    prefetchAllSounds();
-  }, []);
+    useEffect(() => {
+        setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0);
 
-  const resetGame = useCallback(() => {
-    player.current = {
-      id: 1,
-      position: { x: (GAME_WIDTH - PLAYER_WIDTH) / 2, y: PLAYER_Y_OFFSET, z: 0 },
-      size: { width: PLAYER_WIDTH, height: PLAYER_HEIGHT, depth: PLAYER_DEPTH },
-      modelType: ModelType.PlayerShip,
-    };
-    invaders.current = createInvaders();
-    playerLasers.current = [];
-    invaderLasers.current = [];
-    particles.current = [];
-    invaderDirection.current = 'right';
-    invaderSpeed.current = INITIAL_INVADER_SPEED;
-    setScore(0);
-    setLives(INITIAL_LIVES);
-  }, []);
-  
-  const startGame = useCallback(async () => {
-    if (isAudioInitializing) return;
+        if (!canvasRef.current) return;
 
-    if (audioManagerRef.current && isAudioInitialized) {
-        resetGame();
-        setGameState(GameState.Playing);
-        return;
-    }
+        if (!rendererRef.current) {
+            const renderer = new WebGPURenderer(canvasRef.current);
+            rendererRef.current = renderer;
 
-    setIsAudioInitializing(true);
-
-    const audioManager = audioManagerRef.current ?? new AudioManager();
-    const audioReady = await audioManager.initialize();
-
-    if (audioReady) {
-        await audioManager.decodeSounds(soundDataRef.current);
-        audioManagerRef.current = audioManager;
-        setIsAudioInitialized(true);
-    } else {
-        console.error("Audio could not be initialized.");
-    }
-    
-    setIsAudioInitializing(false);
-    resetGame();
-    setGameState(GameState.Playing);
-
-  }, [resetGame, isAudioInitialized, isAudioInitializing]);
-
-  const checkCollision = (obj1: Player | Laser | Particle, obj2: Player | Laser | Invader) => {
-    return (
-      obj1.position.x < obj2.position.x + obj2.size.width &&
-      obj1.position.x + obj1.size.width > obj2.position.x &&
-      obj1.position.y < obj2.position.y + obj2.size.height &&
-      obj1.position.y + obj1.size.height > obj2.position.y &&
-      obj1.position.z < obj2.position.z + obj2.size.depth &&
-      obj1.position.z + obj1.size.depth > obj2.position.z
-    );
-  };
-
-  const handleButtonPress = (key: string) => {
-    keysPressed.current[key] = true;
-    if (key === 'ArrowUp') setCameraYOffset(o => o + 30);
-    if (key === 'ArrowDown') setCameraYOffset(o => o - 30);
-  };
-
-  const handleButtonRelease = (key: string) => {
-    keysPressed.current[key] = false;
-  };
-
-  const gameLoop = useCallback((currentTime: number) => {
-    const deltaTime = (currentTime - lastFrameTime.current) / 1000;
-    lastFrameTime.current = currentTime;
-
-    let newX = player.current.position.x;
-    if (keysPressed.current['a'] || keysPressed.current['ArrowLeft']) {
-      newX -= PLAYER_SPEED * deltaTime;
-    }
-    if (keysPressed.current['d'] || keysPressed.current['ArrowRight']) {
-      newX += PLAYER_SPEED * deltaTime;
-    }
-    player.current.position.x = Math.max(0, Math.min(GAME_WIDTH - PLAYER_WIDTH, newX));
-    
-    if (keysPressed.current[' '] && currentTime - lastPlayerFireTime.current > LASER_COOLDOWN) {
-      lastPlayerFireTime.current = currentTime;
-      playerLasers.current.push({
-        id: currentTime,
-        position: { 
-            x: player.current.position.x + PLAYER_WIDTH / 2 - LASER_WIDTH / 2, 
-            y: player.current.position.y + PLAYER_HEIGHT, 
-            z: player.current.position.z 
-        },
-        size: { width: LASER_WIDTH, height: LASER_HEIGHT, depth: LASER_DEPTH },
-        modelType: ModelType.Laser,
-      });
-      audioManagerRef.current?.play(SoundEffect.PlayerShoot);
-    }
-
-    playerLasers.current = playerLasers.current.map(l => ({ ...l, position: { ...l.position, y: l.position.y + PLAYER_LASER_SPEED * deltaTime } })).filter(l => l.position.y < GAME_HEIGHT);
-    invaderLasers.current = invaderLasers.current.map(l => ({ ...l, position: { ...l.position, y: l.position.y - INVADER_LASER_SPEED * deltaTime } })).filter(l => l.position.y > 0);
-
-    const gravity = -98.0;
-    particles.current = particles.current.map(p => ({
-        ...p,
-        position: {
-            x: p.position.x + p.velocity.x * deltaTime,
-            y: p.position.y + p.velocity.y * deltaTime,
-            z: p.position.z + p.velocity.z * deltaTime,
-        },
-        velocity: {
-            ...p.velocity,
-            y: p.velocity.y + gravity * deltaTime,
-        },
-        life: p.life - deltaTime,
-    })).filter(p => p.life > 0);
-
-    let invadersHitWall = false;
-    invaders.current.forEach(invader => {
-        if (invaderDirection.current === 'right') {
-            invader.position.x += invaderSpeed.current * deltaTime;
-            if (invader.position.x + INVADER_WIDTH > GAME_WIDTH) invadersHitWall = true;
-        } else {
-            invader.position.x -= invaderSpeed.current * deltaTime;
-            if (invader.position.x < 0) invadersHitWall = true;
+            renderer.init().then((success) => {
+                if (success) {
+                    setIsRendererReady(true);
+                    if (gameContainerRef.current) {
+                        const { width, height } = gameContainerRef.current.getBoundingClientRect();
+                        renderer.resize(width, height);
+                    }
+                } else {
+                    console.error("Failed to initialize WebGPU renderer.");
+                }
+            });
         }
-    });
+        
+        inputManager.current = new InputManager();
+        gameEngine.current = new GameEngine(inputManager.current);
 
-    if (invadersHitWall) {
-      invaderDirection.current = invaderDirection.current === 'right' ? 'left' : 'right';
-      invaderSpeed.current += INVADER_SPEED_INCREMENT;
-      invaders.current.forEach(invader => invader.position.y -= INVADER_DROP_DOWN_AMOUNT);
-    }
-
-    invaders.current.forEach(invader => {
-      if (Math.random() < INVADER_FIRE_CHANCE) {
-        invaderLasers.current.push({
-          id: performance.now() + invader.id,
-          position: { 
-              x: invader.position.x + INVADER_WIDTH / 2 - LASER_WIDTH / 2, 
-              y: invader.position.y,
-              z: invader.position.z
-            },
-          size: { width: LASER_WIDTH, height: LASER_HEIGHT, depth: LASER_DEPTH },
-          modelType: ModelType.Laser,
+        const resizeObserver = new ResizeObserver(entries => {
+            if (!entries || entries.length === 0 || !rendererRef.current) return;
+            const { width, height } = entries[0].contentRect;
+            rendererRef.current.resize(width, height);
         });
-        audioManagerRef.current?.play(SoundEffect.InvaderShoot);
-      }
-    });
 
-    const invadersToRemove = new Set<number>();
-    const lasersToRemove = new Set<number>();
-    const invaderColors = [
-        [236/255, 72/255, 153/255, 1.0], [168/255, 85/255, 247/255, 1.0],
-        [250/255, 204/255, 21/255, 1.0], [34/255, 197/255, 94/255, 1.0],
-        [249/255, 115/255, 22/255, 1.0],
-    ];
-
-    playerLasers.current.forEach(laser => {
-      invaders.current.forEach(invader => {
-        if (!invadersToRemove.has(invader.id) && !lasersToRemove.has(laser.id) && checkCollision(laser, invader)) {
-          invadersToRemove.add(invader.id);
-          lasersToRemove.add(laser.id);
-          setScore(s => s + 10 * (INVADER_ROWS - invader.type));
-          audioManagerRef.current?.play(SoundEffect.InvaderKilled);
-          
-          const explosionPosition = {
-              x: invader.position.x + invader.size.width / 2,
-              y: invader.position.y + invader.size.height / 2,
-              z: invader.position.z + invader.size.depth / 2,
-          };
-          const explosionColor = invaderColors[invader.type % invaderColors.length];
-          createExplosion(explosionPosition, 1000, explosionColor);
+        if (gameContainerRef.current) {
+            resizeObserver.observe(gameContainerRef.current);
         }
-      });
-    });
 
-    if (invadersToRemove.size > 0) {
-      invaders.current = invaders.current.filter(i => !invadersToRemove.has(i.id));
-      playerLasers.current = playerLasers.current.filter(l => !lasersToRemove.has(l.id));
-    }
-    
-    const playerLaserHits: number[] = [];
-    invaderLasers.current.forEach(laser => {
-      if (checkCollision(laser, player.current)) {
-        playerLaserHits.push(laser.id);
-        audioManagerRef.current?.play(SoundEffect.PlayerDeath);
-        const explosionPosition = {
-            x: player.current.position.x + player.current.size.width / 2,
-            y: player.current.position.y + player.current.size.height / 2,
-            z: player.current.position.z + player.current.size.depth / 2,
+        return () => {
+            resizeObserver.disconnect();
+            gameEngine.current?.destroy();
         };
-        createExplosion(explosionPosition, 100, [1.0, 1.0, 0.8, 1.0]);
+    }, []);
 
-        setLives(l => {
-          const newLives = l - 1;
-          if (newLives <= 0) {
-            setGameState(GameState.GameOver);
-          }
-          return newLives;
-        });
-      }
-    });
-    if(playerLaserHits.length > 0) {
-        invaderLasers.current = invaderLasers.current.filter(l => !playerLaserHits.includes(l.id));
-    }
-    
-    if (invaders.current.some(invader => invader.position.y <= player.current.position.y + PLAYER_HEIGHT) || invaders.current.length === 0) {
-      setGameState(GameState.GameOver);
-    }
+    useEffect(() => {
+        const prefetchAllSounds = async () => {
+            const fetchPromises = Object.entries(soundFiles).map(async ([key, path]) => {
+                try {
+                    const response = await fetch(path);
+                    const arrayBuffer = await response.arrayBuffer();
+                    soundDataRef.current.set(key as SoundEffect, arrayBuffer);
+                } catch (e) {
+                    console.error(`Failed to fetch sound: ${key}`, e);
+                }
+            });
+            await Promise.all(fetchPromises);
+            setIsAudioPreloaded(true);
+        };
+        prefetchAllSounds();
+    }, []);
 
-    if(rendererRef.current) {
-        rendererRef.current.render({
-            player: player.current,
-            invaders: invaders.current,
-            playerLasers: playerLasers.current,
-            invaderLasers: invaderLasers.current,
-            particles: particles.current,
-        }, cameraYOffset, deltaTime);
-    }
+    const startGame = useCallback(async () => {
+        if (isAudioInitializing || !gameEngine.current) return;
 
-    animationFrameId.current = requestAnimationFrame(gameLoop);
-  }, [createExplosion, cameraYOffset, resetGame]);
+        const startEngineAndSyncState = () => {
+            gameEngine.current!.startGame();
+            setUiState(prev => ({ ...prev, ...gameEngine.current!.getState() }));
+        };
 
-  
+        if (audioManagerRef.current && isAudioInitialized) {
+            startEngineAndSyncState();
+            return;
+        }
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      keysPressed.current[e.key] = true;
+        setIsAudioInitializing(true);
 
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setCameraYOffset(o => o + 30);
-      }
-      if (e.key === 'ArrowDown') {
-       e.preventDefault();
-        setCameraYOffset(o => o - 30);
-      }
-    };
-    const handleKeyUp = (e: KeyboardEvent) => { keysPressed.current[e.key] = false; };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, []);
+        const audioManager = audioManagerRef.current ?? new AudioManager();
+        const audioReady = await audioManager.initialize();
 
-  useEffect(() => {
-    if (gameState === GameState.Playing && isRendererReady) {
-      lastFrameTime.current = performance.now();
-      animationFrameId.current = requestAnimationFrame(gameLoop);
-    } else {
-      cancelAnimationFrame(animationFrameId.current);
-    }
-    return () => cancelAnimationFrame(animationFrameId.current);
-  }, [gameState, gameLoop, isRendererReady]);
+        if (audioReady) {
+            await audioManager.decodeSounds(soundDataRef.current);
+            audioManagerRef.current = audioManager;
+            gameEngine.current.setAudioManager(audioManager);
+            setIsAudioInitialized(true);
+        } else {
+            console.error("Audio could not be initialized.");
+        }
 
-  return (
-    <div
-      ref={gameContainerRef}
-      className="game-container relative bg-[#0d0d0d] overflow-hidden border-2 border-green-500/50 shadow-[0_0_25px_rgba(74,222,128,0.4)]"
-    >
-      <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full" />
-      
-      {/* UI Overlay */}
-      <div className="absolute top-0 left-0 w-full h-full">
-        {gameState !== GameState.Playing ? (
-          <div className="pointer-events-auto">
-            {gameState === GameState.StartMenu && <StartScreen onStart={startGame} isRendererReady={isRendererReady} isAudioPreloaded={isAudioPreloaded} isAudioInitializing={isAudioInitializing} />}
-            {gameState === GameState.GameOver && <GameOverScreen score={score} onRestart={startGame} />}
-          </div>
-        ) : (
-          <>
-            <GameUI score={score} lives={lives} cameraYOffset={cameraYOffset} />
-            {isTouchDevice && <OnScreenControls onButtonPress={handleButtonPress} onButtonRelease={handleButtonRelease} />}
-          </>
-        )}
-      </div>
-    </div>
-  );
+        setIsAudioInitializing(false);
+        startEngineAndSyncState();
+
+    }, [isAudioInitialized, isAudioInitializing]);
+
+    useEffect(() => {
+        if (uiState.gameState !== GameState.Playing || !isRendererReady) {
+            return;
+        }
+
+        let frameId = 0;
+        const gameLoop = (currentTime: number) => {
+            if (!gameEngine.current || !rendererRef.current || !inputManager.current) {
+                frameId = requestAnimationFrame(gameLoop);
+                return;
+            }
+
+            const deltaTime = (currentTime - lastFrameTime.current) / 1000;
+            lastFrameTime.current = currentTime;
+
+            gameEngine.current.update(deltaTime, currentTime);
+            const currentState = gameEngine.current.getState();
+
+            setUiState({
+                ...currentState,
+                pressedKeys: { ...inputManager.current.keys },
+            });
+
+            rendererRef.current.render({
+                player: currentState.player,
+                invaders: currentState.invaders,
+                playerLasers: currentState.playerLasers,
+                invaderLasers: currentState.invaderLasers,
+                particles: currentState.particles,
+            }, currentState.cameraYOffset, deltaTime);
+
+            frameId = requestAnimationFrame(gameLoop);
+        };
+
+        lastFrameTime.current = performance.now();
+        frameId = requestAnimationFrame(gameLoop);
+
+        return () => {
+            cancelAnimationFrame(frameId);
+        };
+    }, [uiState.gameState, isRendererReady]);
+
+    return (
+        <div
+            ref={gameContainerRef}
+            className="game-container relative bg-[#0d0d0d] overflow-hidden border-2 border-green-500/50 shadow-[0_0_25px_rgba(74,222,128,0.4)]"
+        >
+            <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full" />
+            
+            <div className="absolute top-0 left-0 w-full h-full">
+                {uiState.gameState !== GameState.Playing ? (
+                    <div className="pointer-events-auto">
+                        {uiState.gameState === GameState.StartMenu && <StartScreen onStart={startGame} isRendererReady={isRendererReady} isAudioPreloaded={isAudioPreloaded} isAudioInitializing={isAudioInitializing} />}
+                        {uiState.gameState === GameState.GameOver && <GameOverScreen score={uiState.score} onRestart={startGame} />}
+                    </div>
+                ) : (
+                    <>
+                        <GameUI score={uiState.score} lives={uiState.lives} cameraYOffset={uiState.cameraYOffset} />
+                        {isTouchDevice && <OnScreenControls onButtonPress={(key) => { if (inputManager.current) inputManager.current.keys[key] = true; }} onButtonRelease={(key) => { if (inputManager.current) inputManager.current.keys[key] = false; }} />}
+                    </>
+                )}
+            </div>
+        </div>
+    );
 };
 
 export default App;
