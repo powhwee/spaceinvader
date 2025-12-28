@@ -28,7 +28,7 @@ const ScreenOverlay: React.FC<{ children: React.ReactNode, className?: string }>
 
 const StartScreen: React.FC<{ onStart: () => void, isRendererReady: boolean, isAudioPreloaded: boolean, isAudioInitializing: boolean }> = ({ onStart, isRendererReady, isAudioPreloaded, isAudioInitializing }) => {
     const canStart = isRendererReady && isAudioPreloaded;
-    
+
     let buttonText = 'LOADING ASSETS...';
     if (isAudioInitializing) {
         buttonText = 'INITIALIZING AUDIO...';
@@ -38,8 +38,8 @@ const StartScreen: React.FC<{ onStart: () => void, isRendererReady: boolean, isA
 
     return (
         <ScreenOverlay>
-            <h1 className="text-5xl text-cyan-400 font-title mb-4 animate-pulse">SPACE INVADERS 3D</h1>
-            <p className="text-xl text-green-400 mb-8 max-w-lg">A 3D simulation of a high-stakes arcade classic. Created using Gemini AI. The fate of the render pipeline is in your hands.</p>
+            <h1 className="text-5xl text-cyan-400 font-title mb-4 animate-pulse">SPACE INVADERS</h1>
+            <p className="text-xl text-green-400 mb-8 max-w-lg">A 3D rendition of the arcade classic using WebGPU. </p>
             <p className="text-lg text-gray-400 mb-2">[A][D] or [LEFT][RIGHT] to move. [SPACE] to fire.</p>
             <p className="text-lg text-gray-400 mb-2">[UP][DOWN] to change camera perspective.</p>
             <button
@@ -61,7 +61,7 @@ const GameOverScreen: React.FC<{ score: number; onRestart: () => void }> = ({ sc
             onClick={onRestart}
             className="mt-4 px-8 py-4 bg-cyan-500 text-black font-bold text-2xl font-title border-2 border-cyan-700 hover:bg-cyan-400 hover:border-cyan-600 transition-all"
         >
-            RECOMPILE & RUN
+            PLAY AGAIN
         </button>
     </ScreenOverlay>
 );
@@ -165,7 +165,7 @@ const App: React.FC = () => {
                 }
             });
         }
-        
+
         inputManager.current = new InputManager();
         gameEngine.current = new GameEngine(inputManager.current);
 
@@ -282,7 +282,7 @@ const App: React.FC = () => {
             className="game-container relative bg-[#0d0d0d] overflow-hidden border-2 border-green-500/50 shadow-[0_0_25px_rgba(74,222,128,0.4)]"
         >
             <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full" />
-            
+
             <div className="absolute top-0 left-0 w-full h-full">
                 {uiState.gameState !== GameState.Playing ? (
                     <div className="pointer-events-auto">

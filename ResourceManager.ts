@@ -133,4 +133,24 @@ export class ResourceManager {
 
         this.sampler = this.device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
     }
+
+    public async loadTexture(name: string, url: string) {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const image = await createImageBitmap(blob);
+
+        const texture = this.device.createTexture({
+            size: [image.width, image.height, 1],
+            format: 'rgba8unorm',
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
+        });
+
+        this.device.queue.copyExternalImageToTexture(
+            { source: image },
+            { texture: texture },
+            [image.width, image.height]
+        );
+
+        this.textures.set(name, texture);
+    }
 }

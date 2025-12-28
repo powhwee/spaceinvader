@@ -5,6 +5,7 @@ import invaderWGSL from './models/invader.wgsl?raw';
 import laserWGSL from './models/laser.wgsl?raw';
 import cubeWGSL from './models/cube.wgsl?raw';
 import flameWGSL from './models/flame.wgsl?raw';
+import backgroundWGSL from './models/background.wgsl?raw';
 
 import type { Player, Invader, Laser, Particle, GameObject } from './types';
 import { ModelType } from './types';
@@ -22,15 +23,15 @@ const MAX_INSTANCES = 5096;
 const INSTANCE_BYTE_SIZE = 64;
 
 const invaderColors = [
-  [236/255, 72/255, 153/255, 1.0],  // Pink
-  [168/255, 85/255, 247/255, 1.0],   // Purple
-  [250/255, 204/255, 21/255, 1.0],   // Yellow
-  [34/255, 197/255, 94/255, 1.0],    // Green
-  [249/255, 115/255, 22/255, 1.0],   // Orange
+    [236 / 255, 72 / 255, 153 / 255, 1.0],  // Pink
+    [168 / 255, 85 / 255, 247 / 255, 1.0],   // Purple
+    [250 / 255, 204 / 255, 21 / 255, 1.0],   // Yellow
+    [34 / 255, 197 / 255, 94 / 255, 1.0],    // Green
+    [249 / 255, 115 / 255, 22 / 255, 1.0],   // Orange
 ];
-const playerColor = [0, 255/255, 255/255, 1.0]; // This will be a fallback color
-const playerLaserColor = [52/255, 211/255, 153/255, 1.0];
-const invaderLaserColor = [239/255, 68/255, 68/255, 1.0];
+const playerColor = [0, 255 / 255, 255 / 255, 1.0]; // This will be a fallback color
+const playerLaserColor = [52 / 255, 211 / 255, 153 / 255, 1.0];
+const invaderLaserColor = [239 / 255, 68 / 255, 68 / 255, 1.0];
 
 type GameObjects = {
     player: Player;
@@ -63,6 +64,9 @@ export class WebGPURenderer {
     private flamePipeline!: GPURenderPipeline;
     private flameBindGroup!: GPUBindGroup;
 
+    private backgroundPipeline!: GPURenderPipeline;
+    private backgroundBindGroup!: GPUBindGroup;
+
     private flameSystem!: {
         flameInstanceBuffer: GPUBuffer;
         updateFlames: (deltaTime: number, modelMatrix: mat4) => void;
@@ -72,6 +76,7 @@ export class WebGPURenderer {
     private projectionMatrix: mat4;
     private viewMatrix: mat4;
     private viewProjectionMatrix: mat4;
+    private verticalFov: number = 60 * (Math.PI / 180);
 
     constructor(canvas: HTMLCanvasElement) {
         this.canvas = canvas;
@@ -93,7 +98,7 @@ export class WebGPURenderer {
         }
         this.device = await adapter.requestDevice();
         this.context = this.canvas.getContext('webgpu')!;
-        
+
         this.presentationFormat = navigator.gpu.getPreferredCanvasFormat();
         this.context.configure({
             device: this.device,
@@ -105,7 +110,7 @@ export class WebGPURenderer {
 
         // --- Buffers ---
         this.uniformBuffer = this.device.createBuffer({
-            size: 80, // mat4x4<f32> (64) + time f32 (4) + padding (12)
+            size: 80, // mat4x4<f32> (64) + time(4) + aspect(4) + fov(4) = 76 -> 80 aligned
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
         this.flameUniformBuffer = this.device.createBuffer({
@@ -122,39 +127,85 @@ export class WebGPURenderer {
         await this.resourceManager.loadModel(ModelType.Cube, cubeVertices, cubeIndices);
         await this.resourceManager.loadModel(ModelType.Invader, invaderVertices, invaderIndices);
         await this.resourceManager.loadModel(ModelType.Laser, laserVertices, laserIndices);
+        await this.resourceManager.loadTexture('jupiter', 'assets/jupiter.png');
 
         this.resourceManager.shaders.set('playerShip', playerShipWGSL);
         this.resourceManager.shaders.set('invader', invaderWGSL);
         this.resourceManager.shaders.set('laser', laserWGSL);
         this.resourceManager.shaders.set('cube', cubeWGSL);
         this.resourceManager.shaders.set('flame', flameWGSL);
+        this.resourceManager.shaders.set('background', backgroundWGSL);
 
         // --- Create Pipelines & Bind Groups ---
         this._createPlayerShipPipeline();
         this._createNonTexturedPipelines();
         this._createFlamePipeline();
+        this._createBackgroundPipeline();
+
+        // Ensure depth texture and viewport are initialized
+        this.resize(this.canvas.clientWidth, this.canvas.clientHeight);
 
         return true;
     }
 
+    private _createBackgroundPipeline() {
+        const bindGroupLayout = this.device.createBindGroupLayout({
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
+                { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+                { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: {} }
+            ]
+        });
+
+        this.backgroundBindGroup = this.device.createBindGroup({
+            layout: bindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: this.uniformBuffer } },
+                { binding: 1, resource: this.resourceManager.sampler },
+                { binding: 2, resource: this.resourceManager.textures.get('jupiter')!.createView() }
+            ]
+        });
+
+        const pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
+
+        this.backgroundPipeline = this.device.createRenderPipeline({
+            layout: pipelineLayout,
+            vertex: {
+                module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('background')! }),
+                entryPoint: 'vs_main',
+            },
+            fragment: {
+                module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('background')! }),
+                entryPoint: 'fs_main',
+                targets: [{ format: this.presentationFormat }],
+            },
+            primitive: { topology: 'triangle-list' },
+            depthStencil: {
+                depthWriteEnabled: false,
+                depthCompare: 'always',
+                format: 'depth24plus',
+            }
+        });
+    }
+
     private _createPlayerShipPipeline() {
-        const texturedBindGroupLayout = this.device.createBindGroupLayout({ entries: [ { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} }, { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: {} }, { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: {} } ] });
-        this.playerShipBindGroup = this.device.createBindGroup({ layout: texturedBindGroupLayout, entries: [ { binding: 0, resource: { buffer: this.uniformBuffer } }, { binding: 1, resource: { buffer: this.instanceBuffer } }, { binding: 2, resource: this.resourceManager.sampler }, { binding: 3, resource: this.resourceManager.textures.get('baseColor')!.createView() }, { binding: 4, resource: this.resourceManager.textures.get('metallicRoughness')!.createView() } ] });
+        const texturedBindGroupLayout = this.device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} }, { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: {} }, { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: {} }] });
+        this.playerShipBindGroup = this.device.createBindGroup({ layout: texturedBindGroupLayout, entries: [{ binding: 0, resource: { buffer: this.uniformBuffer } }, { binding: 1, resource: { buffer: this.instanceBuffer } }, { binding: 2, resource: this.resourceManager.sampler }, { binding: 3, resource: this.resourceManager.textures.get('baseColor')!.createView() }, { binding: 4, resource: this.resourceManager.textures.get('metallicRoughness')!.createView() }] });
         const pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [texturedBindGroupLayout] });
-        this.playerShipPipeline = this.device.createRenderPipeline({ layout: pipelineLayout, vertex: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('playerShip')! }), entryPoint: 'vs_main', buffers: [{ arrayStride: 8 * 4, attributes: [ { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }, { shaderLocation: 2, offset: 6 * 4, format: 'float32x2' } ] }] }, fragment: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('playerShip')! }), entryPoint: 'fs_main', targets: [{ format: this.presentationFormat, blend: { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' }, alpha: {}} }] }, primitive: { topology: 'triangle-list' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' } });
+        this.playerShipPipeline = this.device.createRenderPipeline({ layout: pipelineLayout, vertex: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('playerShip')! }), entryPoint: 'vs_main', buffers: [{ arrayStride: 8 * 4, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }, { shaderLocation: 2, offset: 6 * 4, format: 'float32x2' }] }] }, fragment: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('playerShip')! }), entryPoint: 'fs_main', targets: [{ format: this.presentationFormat, blend: { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' }, alpha: {} } }] }, primitive: { topology: 'triangle-list' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' } });
     }
 
     private _createNonTexturedPipelines() {
-        const nonTexturedBindGroupLayout = this.device.createBindGroupLayout({ entries: [ { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } } ] });
+        const nonTexturedBindGroupLayout = this.device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }] });
         this.nonTexturedBindGroup = this.device.createBindGroup({ layout: nonTexturedBindGroupLayout, entries: [{ binding: 0, resource: { buffer: this.uniformBuffer } }, { binding: 1, resource: { buffer: this.instanceBuffer } }] });
         const pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [nonTexturedBindGroupLayout] });
-        
+
         const defaultBlend: GPUBlendState = { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' } };
         const additiveBlend: GPUBlendState = { color: { srcFactor: 'src-alpha', dstFactor: 'one' }, alpha: { srcFactor: 'one', dstFactor: 'one' } };
 
         this.invaderPipeline = this.device.createRenderPipeline({
             layout: pipelineLayout,
-            vertex: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('invader')! }), entryPoint: 'vs_main', buffers: [{ arrayStride: 8 * 4, attributes: [ { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }, { shaderLocation: 2, offset: 6 * 4, format: 'float32x2' } ] }] },
+            vertex: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('invader')! }), entryPoint: 'vs_main', buffers: [{ arrayStride: 8 * 4, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }, { shaderLocation: 2, offset: 6 * 4, format: 'float32x2' }] }] },
             fragment: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('invader')! }), entryPoint: 'fs_main', targets: [{ format: this.presentationFormat, blend: defaultBlend }] },
             primitive: { topology: 'triangle-list' },
             depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' },
@@ -162,7 +213,7 @@ export class WebGPURenderer {
 
         this.laserPipeline = this.device.createRenderPipeline({
             layout: pipelineLayout,
-            vertex: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('laser')! }), entryPoint: 'vs_main', buffers: [{ arrayStride: 6 * 4, attributes: [ { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' } ] }] },
+            vertex: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('laser')! }), entryPoint: 'vs_main', buffers: [{ arrayStride: 6 * 4, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }] }] },
             fragment: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('laser')! }), entryPoint: 'fs_main', targets: [{ format: this.presentationFormat, blend: defaultBlend }] },
             primitive: { topology: 'triangle-list' },
             depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' },
@@ -170,7 +221,7 @@ export class WebGPURenderer {
 
         this.particlePipeline = this.device.createRenderPipeline({
             layout: pipelineLayout,
-            vertex: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('cube')! }), entryPoint: 'vs_main', buffers: [{ arrayStride: 6 * 4, attributes: [ { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' } ] }] },
+            vertex: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('cube')! }), entryPoint: 'vs_main', buffers: [{ arrayStride: 6 * 4, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }] }] },
             fragment: { module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('cube')! }), entryPoint: 'fs_main', targets: [{ format: this.presentationFormat, blend: additiveBlend }] },
             primitive: { topology: 'triangle-list' },
             depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' },
@@ -179,7 +230,7 @@ export class WebGPURenderer {
 
     private _createFlamePipeline() {
         this.flameSystem = createFlameSystem(this.device);
-        const flameBindGroupLayout = this.device.createBindGroupLayout({ entries: [ { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } } ] });
+        const flameBindGroupLayout = this.device.createBindGroupLayout({ entries: [{ binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } }] });
         this.flameBindGroup = this.device.createBindGroup({ layout: flameBindGroupLayout, entries: [{ binding: 1, resource: { buffer: this.flameUniformBuffer } }] });
         const flamePipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [flameBindGroupLayout] });
         this.flamePipeline = this.device.createRenderPipeline({
@@ -243,6 +294,7 @@ export class WebGPURenderer {
             verticalFov = 2 * Math.atan(Math.tan(baseHorizontalFov / 2) / aspect);
         }
 
+        this.verticalFov = verticalFov;
         mat4.perspective(this.projectionMatrix, verticalFov, aspect, 1, 2000);
     }
 
@@ -252,6 +304,11 @@ export class WebGPURenderer {
         this.updateCamera(cameraYOffset);
         this.device.queue.writeBuffer(this.uniformBuffer, 0, this.viewProjectionMatrix as Float32Array);
         this.device.queue.writeBuffer(this.uniformBuffer, 64, new Float32Array([performance.now() / 1000]));
+        // Upload aspect ratio to offset 68 (after time + padding is not needed for loose floats in struct)
+        // WGSL struct layout: view_proj(0-64), time(64-68), aspect_ratio(68-72), vertical_fov(72-76)
+        const aspect = this.canvas.width / this.canvas.height;
+        this.device.queue.writeBuffer(this.uniformBuffer, 68, new Float32Array([aspect]));
+        this.device.queue.writeBuffer(this.uniformBuffer, 72, new Float32Array([this.verticalFov]));
         this.device.queue.writeBuffer(this.flameUniformBuffer, 0, this.viewProjectionMatrix as Float32Array);
         this.device.queue.writeBuffer(this.flameUniformBuffer, 64, this.viewMatrix as Float32Array);
 
@@ -262,7 +319,7 @@ export class WebGPURenderer {
         this.flameSystem.updateFlames(deltaTime, playerModelMatrix);
 
         const objectsByModel = new Map<ModelType, GameObject[]>();
-        const allObjects = [ gameObjects.player, ...gameObjects.invaders, ...gameObjects.playerLasers, ...gameObjects.invaderLasers, ...gameObjects.particles ];
+        const allObjects = [gameObjects.player, ...gameObjects.invaders, ...gameObjects.playerLasers, ...gameObjects.invaderLasers, ...gameObjects.particles];
         for (const obj of allObjects) {
             if (!obj) continue;
             if (!objectsByModel.has(obj.modelType)) {
@@ -313,6 +370,13 @@ export class WebGPURenderer {
 
         const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
 
+        // --- Render Background ---
+        if (this.backgroundPipeline) {
+            passEncoder.setPipeline(this.backgroundPipeline);
+            passEncoder.setBindGroup(0, this.backgroundBindGroup);
+            passEncoder.draw(3, 1, 0, 0); // Draw full-screen triangle
+        }
+
         let drawnInstances = 0;
         for (const [modelType, objects] of objectsByModel.entries()) {
             if (objects.length === 0) continue;
@@ -339,15 +403,15 @@ export class WebGPURenderer {
                     pipeline = this.particlePipeline;
                     break;
                 default:
-                    continue; 
+                    continue;
             }
-            
+
             passEncoder.setPipeline(pipeline);
             passEncoder.setBindGroup(0, bindGroup);
             passEncoder.setVertexBuffer(0, model.vertexBuffer);
             passEncoder.setIndexBuffer(model.indexBuffer, indexFormat);
             passEncoder.drawIndexed(model.indices.length, objects.length, 0, 0, drawnInstances);
-            
+
             drawnInstances += objects.length;
         }
 
