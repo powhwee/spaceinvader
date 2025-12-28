@@ -45,7 +45,7 @@ export function createFlameSystem(device: GPUDevice): {
             const enginePos: vec3 = [0, -0.5, 0];
             vec3.transformMat4(p.position, enginePos, modelMatrix);
 
-                        const localVelocity: vec3 = [
+            const localVelocity: vec3 = [
                 (Math.random() - 0.5) * 32,
                 -84 - Math.random() * 56,
                 (Math.random() - 0.5) * 32,
@@ -65,7 +65,7 @@ export function createFlameSystem(device: GPUDevice): {
             }
 
             vec3.transformMat4(p.velocity, localVelocity, rotationMatrix);
-            p.size = Math.random() * 15 + 7.5; // Increased size for debugging
+            p.size = Math.random() * 16 + 8; // Medium (Tuned Down)
         }
 
         activeFlameCount = 0;

@@ -230,7 +230,7 @@ export class WebGPURenderer {
 
     private _createFlamePipeline() {
         this.flameSystem = createFlameSystem(this.device);
-        const flameBindGroupLayout = this.device.createBindGroupLayout({ entries: [{ binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } }] });
+        const flameBindGroupLayout = this.device.createBindGroupLayout({ entries: [{ binding: 1, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }] });
         this.flameBindGroup = this.device.createBindGroup({ layout: flameBindGroupLayout, entries: [{ binding: 1, resource: { buffer: this.flameUniformBuffer } }] });
         const flamePipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [flameBindGroupLayout] });
         this.flamePipeline = this.device.createRenderPipeline({
@@ -251,7 +251,13 @@ export class WebGPURenderer {
             fragment: {
                 module: this.device.createShaderModule({ code: this.resourceManager.shaders.get('flame')! }),
                 entryPoint: 'fs_main',
-                targets: [{ format: this.presentationFormat, blend: { color: { srcFactor: 'src-alpha', dstFactor: 'one' }, alpha: { srcFactor: 'one', dstFactor: 'one' } } }],
+                targets: [{
+                    format: this.presentationFormat,
+                    blend: {
+                        color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
+                        alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }
+                    }
+                }],
             },
             primitive: { topology: 'triangle-list' },
             depthStencil: { depthWriteEnabled: false, depthCompare: 'less', format: 'depth24plus' },
