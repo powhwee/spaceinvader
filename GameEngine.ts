@@ -135,10 +135,10 @@ export class GameEngine {
             newPlayerX += PLAYER_SPEED * deltaTime;
         }
         if (this.inputManager.isPressed('ArrowUp')) {
-            this.cameraYOffset += 5;
+            this.cameraYOffset = Math.min(this.cameraYOffset + 5, 200); // Limit max height
         }
         if (this.inputManager.isPressed('ArrowDown')) {
-            this.cameraYOffset -= 5
+            this.cameraYOffset = Math.max(this.cameraYOffset - 5, -50); // Limit min height
         }
 
         this.player = {
@@ -184,26 +184,47 @@ export class GameEngine {
         // Invader movement
         const originalInvaderDirection = this.invaderDirection;
         let invadersHitWall = false;
+
+        // 1. Predict next position to check for wall hits
         for (const invader of this.invaders) {
             const nextX = invader.position.x + (originalInvaderDirection === 'right' ? this.invaderSpeed : -this.invaderSpeed) * deltaTime;
-            if (nextX < 0 || nextX + INVADER_WIDTH > GAME_WIDTH) {
+            if (nextX <= 0 || nextX + INVADER_WIDTH >= GAME_WIDTH) { // Using <= and >= for safer bounds
                 invadersHitWall = true;
                 break;
             }
         }
 
+        // 2. State Update if Hit
         if (invadersHitWall) {
             this.invaderDirection = originalInvaderDirection === 'right' ? 'left' : 'right';
             this.invaderSpeed += INVADER_SPEED_INCREMENT;
         }
 
+        // 3. Move Invaders
         this.invaders = this.invaders.map(invader => {
+            let nextX = invader.position.x + (originalInvaderDirection === 'right' ? this.invaderSpeed : -this.invaderSpeed) * deltaTime;
+            let nextY = invader.position.y;
+
+            if (invadersHitWall) {
+                // DROP DOWN
+                nextY -= INVADER_DROP_DOWN_AMOUNT;
+
+                // CRITICAL FIX: Clamp to edge immediately to prevent double-triggering next frame
+                if (originalInvaderDirection === 'right') {
+                    // Hit Right Wall -> Clamp to Right Edge
+                    nextX = Math.min(nextX, GAME_WIDTH - INVADER_WIDTH - 1); // -1 buffer
+                } else {
+                    // Hit Left Wall -> Clamp to Left Edge
+                    nextX = Math.max(nextX, 1); // +1 buffer
+                }
+            }
+
             return {
                 ...invader,
                 position: {
                     ...invader.position,
-                    x: invader.position.x + (originalInvaderDirection === 'right' ? this.invaderSpeed : -this.invaderSpeed) * deltaTime,
-                    y: invader.position.y - (invadersHitWall ? INVADER_DROP_DOWN_AMOUNT : 0),
+                    x: nextX,
+                    y: nextY,
                 }
             };
         });
@@ -238,9 +259,9 @@ export class GameEngine {
         const invadersToRemove = new Set<number>();
         const lasersToRemove = new Set<number>();
         const invaderColors = [
-            [236/255, 72/255, 153/255, 1.0], [168/255, 85/255, 247/255, 1.0],
-            [250/255, 204/255, 21/255, 1.0], [34/255, 197/255, 94/255, 1.0],
-            [249/255, 115/255, 22/255, 1.0],
+            [236 / 255, 72 / 255, 153 / 255, 1.0], [168 / 255, 85 / 255, 247 / 255, 1.0],
+            [250 / 255, 204 / 255, 21 / 255, 1.0], [34 / 255, 197 / 255, 94 / 255, 1.0],
+            [249 / 255, 115 / 255, 22 / 255, 1.0],
         ];
 
         this.playerLasers.forEach(laser => {

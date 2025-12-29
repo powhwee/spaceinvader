@@ -67,41 +67,90 @@ const GameOverScreen: React.FC<{ score: number; onRestart: () => void }> = ({ sc
 );
 
 const OnScreenControls: React.FC<{ onButtonPress: (key: string) => void; onButtonRelease: (key: string) => void; }> = ({ onButtonPress, onButtonRelease }) => {
-    const handleTouchStart = (key: string) => (e: React.TouchEvent) => {
+    // REFACTOR: Use Pointer Capture + Bounding Box Check to fix "Sticky" drift.
+    // Use refs to track button state to avoid closure staleness issues if possible, 
+    // though here we rely on the component re-rendering or stable callbacks.
+
+    const handlePointerDown = (key: string) => (e: React.PointerEvent) => {
         e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
         onButtonPress(key);
     };
-    const handleTouchEnd = (key: string) => (e: React.TouchEvent) => {
+
+    const handlePointerMove = (key: string) => (e: React.PointerEvent) => {
+        e.preventDefault();
+        // Check if the pointer is still physically within the button's bounds
+        // even though we have capture.
+        const rect = e.currentTarget.getBoundingClientRect();
+        const isInside = (
+            e.clientX >= rect.left &&
+            e.clientX <= rect.right &&
+            e.clientY >= rect.top &&
+            e.clientY <= rect.bottom
+        );
+
+        if (isInside) {
+            onButtonPress(key);
+        } else {
+            onButtonRelease(key);
+        }
+    };
+
+    const handlePointerUp = (key: string) => (e: React.PointerEvent) => {
+        e.preventDefault();
+        e.currentTarget.releasePointerCapture(e.pointerId);
+        onButtonRelease(key);
+    };
+
+    const handlePointerCancel = (key: string) => (e: React.PointerEvent) => {
         e.preventDefault();
         onButtonRelease(key);
     };
 
+    const dirBtnClass = "w-16 h-16 bg-cyan-500/50 text-white font-bold rounded-full border-2 border-cyan-700/80 flex items-center justify-center select-none touch-none active:bg-cyan-400/80 active:scale-95 transition-transform";
+    const fireBtnClass = "w-24 h-24 bg-green-500/50 text-white font-bold rounded-full border-2 border-green-700/80 flex items-center justify-center text-2xl select-none touch-none active:bg-green-400/80 active:scale-95 transition-transform";
+
     return (
-        <div className="absolute bottom-0 left-0 right-0 p-4 flex justify-between items-end z-10 pointer-events-auto">
+        <div
+            className="absolute bottom-0 left-0 right-0 p-4 flex justify-between items-end z-10 pointer-events-auto select-none touch-none"
+            style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none' }}
+        >
             {/* Movement and Camera Controls */}
             <div className="flex flex-col items-center space-y-2">
                 <button
-                    className="w-16 h-16 bg-cyan-500/50 text-white font-bold rounded-full border-2 border-cyan-700/80 flex items-center justify-center"
-                    onTouchStart={handleTouchStart('ArrowUp')} onTouchEnd={handleTouchEnd('ArrowUp')}
+                    className={dirBtnClass}
+                    onPointerDown={handlePointerDown('ArrowUp')}
+                    onPointerMove={handlePointerMove('ArrowUp')}
+                    onPointerUp={handlePointerUp('ArrowUp')}
+                    onPointerCancel={handlePointerCancel('ArrowUp')}
                 >
                     ▲
                 </button>
                 <div className="flex space-x-2">
                     <button
-                        className="w-16 h-16 bg-cyan-500/50 text-white font-bold rounded-full border-2 border-cyan-700/80 flex items-center justify-center"
-                        onTouchStart={handleTouchStart('ArrowLeft')} onTouchEnd={handleTouchEnd('ArrowLeft')}
+                        className={dirBtnClass}
+                        onPointerDown={handlePointerDown('ArrowLeft')}
+                        onPointerMove={handlePointerMove('ArrowLeft')}
+                        onPointerUp={handlePointerUp('ArrowLeft')}
+                        onPointerCancel={handlePointerCancel('ArrowLeft')}
                     >
                         ◀
                     </button>
                     <button
-                        className="w-16 h-16 bg-cyan-500/50 text-white font-bold rounded-full border-2 border-cyan-700/80 flex items-center justify-center"
-                        onTouchStart={handleTouchStart('ArrowDown')} onTouchEnd={handleTouchEnd('ArrowDown')}
+                        className={dirBtnClass}
+                        onPointerDown={handlePointerDown('ArrowDown')}
+                        onPointerMove={handlePointerMove('ArrowDown')}
+                        onPointerUp={handlePointerUp('ArrowDown')}
+                        onPointerCancel={handlePointerCancel('ArrowDown')}
                     >
                         ▼
                     </button>
                     <button
-                        className="w-16 h-16 bg-cyan-500/50 text-white font-bold rounded-full border-2 border-cyan-700/80 flex items-center justify-center"
-                        onTouchStart={handleTouchStart('ArrowRight')} onTouchEnd={handleTouchEnd('ArrowRight')}
+                        className={dirBtnClass}
+                        onPointerDown={handlePointerDown('ArrowRight')}
+                        onPointerMove={handlePointerMove('ArrowRight')}
+                        onPointerUp={handlePointerUp('ArrowRight')}
+                        onPointerCancel={handlePointerCancel('ArrowRight')}
                     >
                         ▶
                     </button>
@@ -110,8 +159,11 @@ const OnScreenControls: React.FC<{ onButtonPress: (key: string) => void; onButto
 
             {/* Fire Button */}
             <button
-                className="w-24 h-24 bg-green-500/50 text-white font-bold rounded-full border-2 border-green-700/80 flex items-center justify-center text-2xl"
-                onTouchStart={handleTouchStart(' ')} onTouchEnd={handleTouchEnd(' ')}
+                className={fireBtnClass}
+                onPointerDown={handlePointerDown(' ')}
+                onPointerMove={handlePointerMove(' ')}
+                onPointerUp={handlePointerUp(' ')}
+                onPointerCancel={handlePointerCancel(' ')}
             >
                 FIRE
             </button>
@@ -279,7 +331,9 @@ const App: React.FC = () => {
     return (
         <div
             ref={gameContainerRef}
-            className="game-container relative bg-[#0d0d0d] overflow-hidden border-2 border-green-500/50 shadow-[0_0_25px_rgba(74,222,128,0.4)]"
+            className="game-container relative bg-[#0d0d0d] overflow-hidden border-2 border-green-500/50 shadow-[0_0_25px_rgba(74,222,128,0.4)] select-none touch-none"
+            onContextMenu={(e) => e.preventDefault()}
+            style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }}
         >
             <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full" />
 
