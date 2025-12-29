@@ -11,9 +11,7 @@ const GameUI: React.FC<{ score: number; lives: number, cameraYOffset: number }> 
         <div>
             <p>SCORE: {score}</p>
         </div>
-        <div className="absolute left-1/2 -translate-x-1/2">
-            <p>CAMERA_Y_OFFSET: {cameraYOffset.toFixed(2)}</p>
-        </div>
+
         <div>
             <p>LIVES: {'<'.repeat(lives).padEnd(INITIAL_LIVES, ' ')}</p>
         </div>
