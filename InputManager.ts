@@ -18,6 +18,10 @@ export class InputManager {
         return this.keys[key] || false;
     }
 
+    public resetKeys() {
+        this.keys = {};
+    }
+
     public destroy() {
         window.removeEventListener('keydown', this.handleKeyDown);
         window.removeEventListener('keyup', this.handleKeyUp);

@@ -229,8 +229,17 @@ const App: React.FC = () => {
             resizeObserver.observe(gameContainerRef.current);
         }
 
+        // SAFETY NET: Clear inputs on window blur or visibility change
+        const handleBlur = () => {
+            if (inputManager.current) inputManager.current.resetKeys();
+        };
+        window.addEventListener('blur', handleBlur);
+        document.addEventListener('visibilitychange', handleBlur);
+
         return () => {
             resizeObserver.disconnect();
+            window.removeEventListener('blur', handleBlur);
+            document.removeEventListener('visibilitychange', handleBlur);
             gameEngine.current?.destroy();
         };
     }, []);
