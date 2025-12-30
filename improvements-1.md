@@ -15,20 +15,21 @@ Overall, the project is well-structured for a prototype and demonstrates a good 
 **1. Game Logic and State Management**
 
 *   **Critique:** The `App.tsx` component is currently acting as both the main React UI component and the core "game engine." All the game logic—player movement, collision detection, invader AI, and state updates—is handled within the massive `gameLoop` `useCallback`. This tightly couples the game's core logic to the React component lifecycle.
-*   **Suggestion for Improvement:** Extract the core game logic into a dedicated, framework-agnostic class or module (e.g., `GameEngine.ts`). ... This change would provide a much cleaner separation of concerns.
+*   **Suggestion for Improvement:** Extract the core game logic into a dedicated, framework-agnostic class or module (e.g., `GameEngine.ts`).
+*   **Status:** [x] **Implemented**. Logic moved to `GameEngine.ts`.
 
 **2. Renderer Architecture**
 
 *   **Critique:** The `renderer.ts` file is well-organized but is becoming a bit monolithic. The `init()` method is responsible for loading all models, creating all buffers, compiling all shaders, and creating all rendering pipelines.
 *   **Suggestion for Improvement:**
-    *   **Resource Management:** Create a dedicated `ResourceManager` class to handle the loading and storage of assets.
-    *   **Pipeline Abstraction:** The creation of each render pipeline could be encapsulated into its own function or a small factory.
-    *   **Externalize Shaders:** Move the WGSL shader code from TypeScript string literals into their own `.wgsl` files...
+    *   **Resource Management:** [x] **Implemented**. `ResourceManager.ts` created.
+    *   **Externalize Shaders:** [x] **Implemented**. Shaders moved to `models/*.wgsl`.
 
 **3. Input Handling**
 
 *   **Critique:** The input handling is currently done with `keydown` and `keyup` event listeners in a `useEffect` hook in `App.tsx`, which is a standard and effective approach.
 *   **Suggestion for Improvement (Minor):** For a more robust and decoupled system, you could create a simple `InputManager` class...
+*   **Status:** [x] **Implemented**. `InputManager.ts` created with touch safety nets.
 
 **Summary**
 
@@ -94,8 +95,8 @@ The abstracted `Mesh` component is designed to handle exactly this scenario. The
 
 Your `ResourceManager` would have different methods for creating `Mesh` objects, but they would all output the same standard `Mesh` object.
 
-*   **`createMeshFromData(name, vertices, indices)`**: Takes raw arrays, creates `GPUBuffer`s, writes the data to them, and returns a `Mesh` object. This is for your procedural models.
-*   **`loadMeshFromGltf(name, url)`**: Loads a `.gltf` file, extracts the vertex and index arrays, and then calls `createMeshFromData()` with that data.
+*   **`createMeshFromData(name, vertices, indices)`**: [x] **Implemented**. Used for procedural particles/invaders.
+*   **`loadMeshFromGltf(name, url)`**: [x] **Implemented**. Used for the Player Ship.
 
 **How It Comes Together**
 

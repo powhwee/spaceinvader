@@ -17,11 +17,11 @@ Here is a detailed breakdown of how we can achieve this:
 
 **2. Dynamically Resize the Canvas**
 *   **The Strategy:** The best way to do this is with a `ResizeObserver`. This is a modern browser API that efficiently monitors an element for size changes.
-*   **Implementation:** In `App.tsx`, I will attach a `ResizeObserver` to the main game container. When it detects a resize, it will update the `<canvas>` element's `width` and `height` attributes.
+*   **Implementation:** [x] **Implemented**. `ResizeObserver` used in `App.tsx` and `renderer.ts`.
 
 **3. Update the Renderer on Resize**
 *   **The Strategy:** I will add a new `resize(width, height)` method to the `WebGPURenderer` class.
-*   **Implementation:** This `resize` method will be responsible for re-creating the depth texture and, most importantly, updating the camera's projection matrix with the new aspect ratio (`width / height`).
+*   **Implementation:** [x] **Implemented**. Returns a `projectionMatrix` based on aspect ratio.
 
 **4. Keep the Game Logic Fixed**
 *   **The Strategy:** All game logic, such as player speed and positions, will continue to operate within the fixed 800x600 world space. The scaling to fit the screen is handled entirely by the renderer's camera, not by changing the game's rules.
@@ -49,7 +49,8 @@ Crucially, this calculation results in a **constant distance**. The camera's Z p
 **So, What *Does* Change When the Screen Resizes?**
 The one thing that **does** change is the **`aspect` ratio** (`width / height`) that we feed into the renderer's projection matrix (`mat4.perspective`). By telling the projection matrix the new shape of the screen, it automatically handles how to map the 3D scene onto the new 2D rectangle of your canvas, creating the letterbox effect and preventing distortion.
 
-In summary: The camera position is determined once based on the fixed size of your game world. It does not change with screen size. The resizing is handled entirely by updating the projection matrix with the new aspect ratio.
+In summary: The camera position is determined once based on the fixed size of your game world. It does not change with screen size.
+*   **Status:** [x] **Implemented**. Camera Math: `(GAME_WIDTH / 2) / tan(FOV / 2)` is used.
 
 ---
 
@@ -71,3 +72,4 @@ In summary: The camera position is determined once based on the fixed size of yo
 3.  **Functionality:** These on-screen buttons will hook directly into the same input system the keyboard uses. When you press and hold the "right" on-screen button, it will be exactly as if you were holding down the "right arrow" key. This is done by handling `touchstart` and `touchend` events.
 
 4.  **Conditional Rendering:** I will add logic to detect if the user is on a touch-enabled device and will only show these controls on mobile or tablets.
+*   **Status:** [x] **Implemented**. `OnScreenControls` component added with touch support.

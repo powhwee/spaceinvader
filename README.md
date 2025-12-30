@@ -24,11 +24,11 @@ The goal of this project is to create a visually rich, 3D version of Space Invad
 
 ### How It Works: Gameplay & Logic
 
-The main game logic resides in `App.tsx`.
+The main game logic has been decoupled from the React UI and resides in `GameEngine.ts`, while `App.tsx` acts as the orchestrator.
 
 *   **Game State:** The game is managed by a state machine with three states: `StartMenu`, `Playing`, and `GameOver`.
-*   **Game Loop:** A `requestAnimationFrame` loop in `App.tsx` drives the game's progression. On each frame, it:
-    1.  **Handles Input:** Checks for keyboard input to move the player's ship left (`A`/`ArrowLeft`) and right (`D`/`ArrowRight`), fire lasers (`Space`), and adjust the camera's vertical position (`ArrowUp`/`ArrowDown`).
+*   **Game Loop:** A `requestAnimationFrame` loop in `App.tsx` drives the game. On each frame, it delegates to `GameEngine.ts` to update the physical world state, then passes that state to the renderer.
+    1.  **Handles Input:** The `InputManager` captures keyboard and touch events. The engine uses this to move the ship and fire.
     2.  **Updates Positions:** Moves the player ship, lasers, and the swarm of invaders based on their speeds and the time elapsed since the last frame.
     3.  **Invader AI:** The invader fleet moves in unison. When an invader hits the edge of the screen, the entire fleet reverses direction, moves down, and increases its speed. Invaders also have a small, random chance to fire their own lasers.
     4.  **Collision Detection:** It checks for collisions between the player's lasers and the invaders, and between the invaders' lasers and the player.
@@ -44,7 +44,8 @@ The `renderer.ts` file is the heart of the graphics engine.
     *   It loads the player's ship model from a `.gltf` file.
     *   It procedurally generates the geometry for the invaders (by combining small cubes into a pixel-art-style shape), lasers, and particles (which are icospheres).
 3.  **Pipelines & Shaders:** It creates separate **render pipelines** for each type of object (player ship, invader, laser, particle). A pipeline bundles together the vertex and fragment shaders, buffer layouts, and blending/depth settings.
-    *   **Player Ship Shader:** A sophisticated shader that uses textures for color and material properties (metallic/roughness) to create a realistic look with dynamic lighting.
+    *   **Player Ship Shader:** A PBR-lite shader with **Dynamic Environment Mapping**, reflecting the rotating Jupiter background on the ship's hull.
+    *   **Engine Effects:** Uses **Volumetric Raymarching** (`flame.wgsl`) to render cinematic, 3D animated engine exhaust.
     *   **Invader Shader:** A unique shader that creates a "dissolve" effect on the invaders, making them look like they are glitching or disintegrating over time.
     *   **Particle Shader:** A shader that makes particles fade out and change color over their lifetime, creating a convincing explosion effect.
 4.  **Instanced Rendering:** To render thousands of objects (like particles) efficiently, the renderer uses **instancing**. It sends the geometry for a single object (e.g., one sphere) to the GPU once, and then provides a list of positions, sizes, and colors for all instances of that object. The GPU then draws all the instances in a single, highly efficient operation.
@@ -58,8 +59,11 @@ The `renderer.ts` file is the heart of the graphics engine.
 ### Key Files in the Project
 
 *   `index.html`: The entry point of the application, containing the canvas where the game is rendered.
-*   `App.tsx`: The main React component holding the game logic, state, and UI.
+*   `App.tsx`: The React entry point that manages the game loop and high-level UI states (Start/Game Over).
+*   `GameEngine.ts`: The core physics engine handling movement, collisions, and game rules.
 *   `renderer.ts`: The WebGPU rendering engine.
+*   `ResourceManager.ts`: Handles async loading of GLTF models, textures, and ensures assets are ready before launch.
+*   `InputManager.ts`: Centralizes input handling for both Keyboard and Touch (mobile) controls.
 *   `constants.ts`: A central file for all game parameters like speed, size, and counts, making it easy to tweak the gameplay.
 *   `types.ts`: Defines the TypeScript data structures for all game objects (`Player`, `Invader`, `Laser`, etc.).
 *   `models/`: A directory containing the geometry and shader code (WGSL) for each 3D object.
