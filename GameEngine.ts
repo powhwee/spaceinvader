@@ -75,6 +75,7 @@ export class GameEngine {
     }
 
     public resetGame() {
+        this.inputManager.resetKeys();
         this.player = this.createPlayer();
         this.invaders = createInvaders();
         this.playerLasers = [];
