@@ -22,6 +22,10 @@ struct InstanceInput {
 
 struct Globals {
     view_proj: mat4x4<f32>,
+    time: f32, // Added to match renderer.ts alignment
+    padding_1: f32,
+    padding_2: f32,
+    padding_3: f32,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -52,6 +56,30 @@ fn vs_main(
 @group(0) @binding(3) var baseColorTexture: texture_2d<f32>;
 @group(0) @binding(4) var metallicRoughnessTexture: texture_2d<f32>;
 
+// Helper to generate stars
+fn getStarIntensity(dir: vec3<f32>, time: f32) -> f32 {
+    // 1. Rotation for movement (Gliding)
+    let speed = 0.5; // Slower, majestic glide
+    let angle = time * speed;
+    let s = sin(angle);
+    let c = cos(angle);
+    let rot_dir = vec3<f32>(dir.x * c - dir.z * s, dir.y, dir.x * s + dir.z * c);
+
+    // 2. Continuous Interference Pattern (No Flickering!)
+    // We use sine waves to create a smooth grid of glowing spots.
+    // Raising the minimal sine overlap to a high power makes them tiny sharp dots.
+    
+    let scale = 8.0; // Reduced density for mobile (fewer stars)
+    let pos = rot_dir * scale;
+    
+    // Create broad, smooth peaks
+    let raw_noise = sin(pos.x) * sin(pos.y * 1.3) * sin(pos.z * 0.7); 
+    
+    // Sharpen peaks into stars
+    // pow(..., 4.0) makes huge, soft glowing orbs (highly visible on small screens)
+    return pow(max(0.0, raw_noise), 4.0); 
+}
+
 @fragment
 fn fs_main(
     @location(1) normal: vec3<f32>,
@@ -69,44 +97,52 @@ fn fs_main(
     let linearBaseColor = pow(srgbColor.rgb, vec3<f32>(2.2));
 
     let pbrMap = textureSample(metallicRoughnessTexture, mySampler, uv);
-    // MATERIAL REMASTER: Force the ship to look newer/shinier than the texture says
-    // Scale roughness down (0.0 = mirror, 1.0 = matte). 
-    // Changing from raw "pbrMap.g" to "pbrMap.g * 0.3" makes it super glossy.
-    let roughness = pbrMap.g * 0.3; 
     
-    // Force more metallic look (if the map is gray, push it to white)
-    let metallic = max(pbrMap.b, 0.8); 
+    // --- INTELLIGENT MATERIAL PARSING ---
+    // 1. Check Blue Channel (Metalness) - Glass should be 0.0
+    // 2. Check Base Color Brightness - Window is usually painted dark/black.
+    // We combine these to be sure we catch the window.
+    let is_metal_low = 1.0 - smoothstep(0.0, 0.1, pbrMap.b);
+    let is_color_dark = 1.0 - smoothstep(0.0, 0.1, length(linearBaseColor)); 
+    let is_glass = max(is_metal_low, is_color_dark); // Logical OR
+    
+    // Hull Properties: Metallic, slightly rough
+    let hull_roughness = pbrMap.g * 0.3;
+    let hull_metallic = max(pbrMap.b, 0.8);
+    
+    // Glass Properties: Smooth mirror, dielectric (non-metal)
+    let glass_roughness = 0.0;
+    let glass_metallic = 0.0;
+    
+    let roughness = mix(hull_roughness, glass_roughness, is_glass);
+    let metallic = mix(hull_metallic, glass_metallic, is_glass);
 
-    // --- RESTORED LIGHTING CALCULATIONS ---
+    // --- LIGHTING ---
     // Diffuse
     let diffuse_strength = max(dot(N, light_direction), 0.0);
-    // Metal absorbs diffuse light (black diffuse), dielectric reflects it
     let diffuse_color = (1.0 - metallic) * linearBaseColor;
     let diffuse = diffuse_strength * diffuse_color * light_color * light_intensity;
 
-    // Specular (Blinn-Phong) - Direct light reflection
+    // Specular
     let halfway_vec = normalize(light_direction + view_direction);
     let spec_angle = max(dot(N, halfway_vec), 0.0);
     let spec_power = 2.0 + (1.0 - roughness) * 512.0;
     let specular_strength = pow(spec_angle, spec_power);
-    
-    // Metal specular is tinted base color, dielectric is white
     let specular_color = mix(vec3<f32>(1.0), linearBaseColor, metallic);
     let specular = specular_strength * specular_color * light_color * specular_intensity;
-
     // Ambient
     let ambient_intensity = 0.3;
     let ambient_color = vec3<f32>(1.0, 1.0, 1.0);
     let ambient = ambient_intensity * ambient_color * linearBaseColor;
 
-    // Fake IBL (Image Based Lighting)
+    // --- FAKE IBL + STARLIGHT ---
     let ref_dir = reflect(-view_direction, N);
     let t = ref_dir.y * 0.5 + 0.5; 
     
-    // TUNED ENVIRONMENT COLORS: Vibrant Blue Sky
-    let sky_color = vec3<f32>(0.0, 0.4, 0.9); // Azure Blue (Visible!)
-    let horizon_color = vec3<f32>(0.6, 0.7, 0.9); // Blue-White Horizon
-    let ground_color = vec3<f32>(0.05, 0.05, 0.1); // Deep Dark Blue Ground
+    // Environment Colors
+    let sky_color = vec3<f32>(0.0, 0.4, 0.9);
+    let horizon_color = vec3<f32>(0.6, 0.7, 0.9);
+    let ground_color = vec3<f32>(0.05, 0.05, 0.1);
     
     var env_color = mix(ground_color, horizon_color, smoothstep(0.3, 0.5, t));
     env_color = mix(env_color, sky_color, smoothstep(0.5, 1.0, t));
@@ -115,17 +151,32 @@ fn fs_main(
     let sun_spot = pow(max(dot(ref_dir, light_direction), 0.0), 32.0); 
     env_color += vec3<f32>(1.5, 1.3, 1.0) * sun_spot; 
 
-    // Fresnel (Reflection Intensity)
+    // --- PROCEDURAL STARLIGHT ---
+    // Show stars mostly in the upper hemisphere
+    if (t > 0.3) {
+        let star_brightness = getStarIntensity(ref_dir, globals.time);
+        
+        // PHYSICS COMPENSATION:
+        // Glass only reflects ~4% of light at normal incidence (looking straight at it).
+        // To make stars visible, they need to be blindingly bright (HDR).
+        // Boosting from 5.0 -> 80.0 ensures roughly 3.0 reaches the eye (80 * 0.04).
+        env_color += vec3<f32>(80.0, 80.0, 100.0) * star_brightness;
+    }
+
+    // Fresnel
     let f0 = mix(vec3<f32>(0.04), linearBaseColor, metallic);
     let fresnel_env = f0 + (1.0 - f0) * pow(1.0 - max(dot(N, view_direction), 0.0), 5.0);
+    
+    // Apply reflection
+    // If it's glass, we want pure reflection
     let env_reflection = env_color * fresnel_env * (1.0 - roughness);
     
-    // Rim Light (Re-added for edge definition)
+    // Rim Light
     let fresnel_rim = pow(1.0 - max(dot(N, view_direction), 0.0), 3.0);
-    let rim_color = vec3<f32>(0.4, 0.8, 1.0); // Cyan Rim
+    let rim_color = vec3<f32>(0.4, 0.8, 1.0); 
     let rim = fresnel_rim * rim_color * 1.5;
 
-    // Combine: Lighting + Reflection + Rim
+    // Combine
     var final_color = ambient + diffuse + specular + env_reflection + rim;
 
     // Manually encode linear color to sRGB space for final output.
