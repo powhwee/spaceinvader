@@ -290,7 +290,16 @@ export class WebGPURenderer {
         });
 
         const aspect = width / height;
-        const nativeAspect = 800 / 600;
+
+        // MOBILE ZOOM FEATURE:
+        // In portrait mode (mostly mobile), the standard 800-width leaves game objects too small.
+        // Since the gameplay happens in the center 650px (Invader Formation = 650px),
+        // we can safely crop the 800px width down to ~660px to zoom in.
+        // This gives a ~21% size boost to all objects.
+        const isPortrait = width < height;
+        const targetWidth = isPortrait ? 660 : 800;
+
+        const nativeAspect = targetWidth / 600; // 600 is GAME_HEIGHT
 
         const baseVerticalFov = 60 * (Math.PI / 180);
         let verticalFov = baseVerticalFov;

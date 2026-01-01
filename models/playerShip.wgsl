@@ -69,15 +69,15 @@ fn getStarIntensity(dir: vec3<f32>, time: f32) -> f32 {
     // We use sine waves to create a smooth grid of glowing spots.
     // Raising the minimal sine overlap to a high power makes them tiny sharp dots.
     
-    let scale = 8.0; // Reduced density for mobile (fewer stars)
+    let scale = 3.0; // Extremely low density (only ~2-3 visible at a time)
     let pos = rot_dir * scale;
     
     // Create broad, smooth peaks
     let raw_noise = sin(pos.x) * sin(pos.y * 1.3) * sin(pos.z * 0.7); 
     
     // Sharpen peaks into stars
-    // pow(..., 4.0) makes huge, soft glowing orbs (highly visible on small screens)
-    return pow(max(0.0, raw_noise), 4.0); 
+    // pow(..., 2.0) makes huge, soft drifting nebulas/suns.
+    return pow(max(0.0, raw_noise), 2.0); 
 }
 
 @fragment
