@@ -56,6 +56,32 @@ The `renderer.ts` file is the heart of the graphics engine.
     *   Binds the appropriate pipeline and data for each model type and issues a draw call.
     *   Submits the commands to the GPU for rendering.
 
+### Architecture overview
+```mermaid
+graph TD
+    subgraph "React Layer (Main Thread)"
+        UI[App.tsx<br/>UI Overlay & loops]
+        Input[InputManager<br/>Touch & Keyboard Safety]
+    end
+
+    subgraph "Logic Engine (Pure TS)"
+        Game[GameEngine.ts<br/>Physics & Collisions]
+        State[GameState<br/>800x600 Fixed Grid]
+    end
+
+    subgraph "GPU Layer (WebGPU)"
+        Renderer[Renderer.ts<br/>WebGPU Pipeline]
+        Resource[ResourceManager<br/>GLTF & Assets]
+        Shader1[Shaders<br/>WGSL / Fragment / Vertex]
+    end
+
+    UI -->|requestAnimationFrame| Game
+    UI -->|Render Calls| Renderer
+    Game -->|Position Data| Renderer
+    Renderer -->|Draw| Shader1
+    Input -->|Events| Game
+```
+
 ### Key Files in the Project
 
 *   `index.html`: The entry point of the application, containing the canvas where the game is rendered.
