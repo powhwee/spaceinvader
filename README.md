@@ -8,9 +8,34 @@ This project is a 3D remake of the classic arcade game "Space Invaders," built u
 
 Here's a detailed breakdown of the project:
 
-### High-Level Purpose
+### High-Level Overview
 
 The goal of this project is to create a visually rich, 3D version of Space Invaders that runs in a web browser. It leverages the power of the WebGPU API for high-performance 3D graphics, demonstrating what's possible with modern web standards. The game features a 3D player ship, a fleet of 3D invaders, laser projectiles, and particle effects for explosions, all rendered in a 3D space.
+
+```mermaid
+graph TD
+    subgraph "React Layer (Main Thread)"
+        UI[App.tsx<br/>UI Overlay & loops]
+        Input[InputManager<br/>Touch & Keyboard Safety]
+    end
+
+    subgraph "Logic Engine (Pure TS)"
+        Game[GameEngine.ts<br/>Physics & Collisions]
+        State[GameState<br/>800x600 Fixed Grid]
+    end
+
+    subgraph "GPU Layer (WebGPU)"
+        Renderer[Renderer.ts<br/>WebGPU Pipeline]
+        Resource[ResourceManager<br/>GLTF & Assets]
+        Shader1[Shaders<br/>WGSL / Fragment / Vertex]
+    end
+
+    UI -->|requestAnimationFrame| Game
+    UI -->|Render Calls| Renderer
+    Game -->|Position Data| Renderer
+    Renderer -->|Draw| Shader1
+    Input -->|Events| Game
+```
 
 ### Core Technologies
 
@@ -56,31 +81,6 @@ The `renderer.ts` file is the heart of the graphics engine.
     *   Binds the appropriate pipeline and data for each model type and issues a draw call.
     *   Submits the commands to the GPU for rendering.
 
-### Architecture overview
-```mermaid
-graph TD
-    subgraph "React Layer (Main Thread)"
-        UI[App.tsx<br/>UI Overlay & loops]
-        Input[InputManager<br/>Touch & Keyboard Safety]
-    end
-
-    subgraph "Logic Engine (Pure TS)"
-        Game[GameEngine.ts<br/>Physics & Collisions]
-        State[GameState<br/>800x600 Fixed Grid]
-    end
-
-    subgraph "GPU Layer (WebGPU)"
-        Renderer[Renderer.ts<br/>WebGPU Pipeline]
-        Resource[ResourceManager<br/>GLTF & Assets]
-        Shader1[Shaders<br/>WGSL / Fragment / Vertex]
-    end
-
-    UI -->|requestAnimationFrame| Game
-    UI -->|Render Calls| Renderer
-    Game -->|Position Data| Renderer
-    Renderer -->|Draw| Shader1
-    Input -->|Events| Game
-```
 
 ### Key Files in the Project
 
